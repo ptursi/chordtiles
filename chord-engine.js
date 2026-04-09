@@ -420,6 +420,15 @@
         continue;
       }
 
+      // Triads Only mode: any scoring group with more than 3 tiles is invalid
+      if (CT.state && CT.state.settings.triadsOnlyMode) {
+        var tilesInGroup = group.cells.filter(function (c) { return c.tile; }).length;
+        if (tilesInGroup > 3) {
+          errors.push("Triads Only mode: groups are limited to 3 notes — extensions to 7ths and 9ths are disabled.");
+          continue;
+        }
+      }
+
       // *** BOARD VALIDATION: use exact full-group detection only.
       // CT.detectExactChord rejects groups with >5 unique pitch classes outright
       // and never tries subsets. This ensures an extended line that no longer
