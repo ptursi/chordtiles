@@ -225,6 +225,114 @@
     autoPlayTileOnTap: true,
     autoPlayChordOnConfirm: true,
     playbackMode: "harmonic",
-    enableTileSwap: true
+    enableTileSwap: true,
+    selectedBoardVariantId: "pure-balance",
+    enableBlockedSpaces: true
+  };
+
+  /* ── Board Variants ─────────────────────────────────────────────────── */
+
+  CT.BOARD_VARIANTS = [
+    {
+      id: "harmonic-crown",
+      name: "Harmonic Crown",
+      shortDescription: "A balanced board with strong outer-corner power, diagonal tension, and a regal ring of high-impact spaces.",
+      longDescription: "Harmonic Crown spreads its strongest rewards toward the outer structure while still keeping meaningful central development. Triple Chord spaces in the corners and upper/lower crown points create long-term goals, while Double Chord and Triple Note spaces support strategic upgrades and lane contests without overcrowding the middle.",
+      layout: [
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"],
+        ["--","DC","--","--","TN","--","--","DN","--","--","TN","--","--","DC","--"],
+        ["--","--","TC","--","DN","--","--","--","--","--","DN","--","TC","--","--"],
+        ["DN","--","--","DC","--","--","DN","--","DN","--","--","DC","--","--","DN"],
+        ["--","TN","--","--","DC","--","--","--","--","--","DC","--","--","TN","--"],
+        ["--","--","--","DN","--","TN","--","--","--","TN","--","DN","--","--","--"],
+        ["--","DN","--","--","--","--","DN","--","DN","--","--","--","DN","--","--"],
+        ["TC","--","--","--","DN","--","--","--","--","--","DN","--","--","--","TC"],
+        ["--","DN","--","--","--","--","DN","--","DN","--","--","--","DN","--","--"],
+        ["--","--","--","DN","--","TN","--","--","--","TN","--","DN","--","--","--"],
+        ["--","TN","--","--","DC","--","--","--","--","--","DC","--","--","TN","--"],
+        ["DN","--","--","DC","--","--","DN","--","DN","--","--","DC","--","--","DN"],
+        ["--","--","TC","--","DN","--","--","--","--","--","DN","--","TC","--","--"],
+        ["--","DC","--","--","TN","--","--","DN","--","--","TN","--","--","DC","--"],
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"]
+      ]
+    },
+    {
+      id: "pure-balance",
+      name: "Pure Balance",
+      shortDescription: "An ultra-sparse board with rare power spikes and clean, readable strategy from opening to endgame.",
+      longDescription: "Pure Balance is a disciplined board with very sparse premium placement. It rewards patience, efficient chord-building, and careful board control. Most of the pressure comes from note placement and timing rather than multiplier chaining, making this board great for players who want clarity and strong fundamentals.",
+      layout: [
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"],
+        ["--","--","--","--","TN","--","--","--","--","--","TN","--","--","--","--"],
+        ["--","--","DC","--","--","--","DN","--","DN","--","--","--","DC","--","--"],
+        ["DN","--","--","--","--","--","--","--","--","--","--","--","--","--","DN"],
+        ["--","TN","--","--","DC","--","--","DN","--","--","DC","--","--","TN","--"],
+        ["--","--","--","--","--","DN","--","--","--","DN","--","--","--","--","--"],
+        ["--","--","DN","--","--","--","--","--","--","--","--","--","DN","--","--"],
+        ["TC","--","--","--","DN","--","--","--","--","--","DN","--","--","--","TC"],
+        ["--","--","DN","--","--","--","--","--","--","--","--","--","DN","--","--"],
+        ["--","--","--","--","--","DN","--","--","--","DN","--","--","--","--","--"],
+        ["--","TN","--","--","DC","--","--","DN","--","--","DC","--","--","TN","--"],
+        ["DN","--","--","--","--","--","--","--","--","--","--","--","--","--","DN"],
+        ["--","--","DC","--","--","--","DN","--","DN","--","--","--","DC","--","--"],
+        ["--","--","--","--","TN","--","--","--","--","--","TN","--","--","--","--"],
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"]
+      ]
+    },
+    {
+      id: "split-lanes",
+      name: "Split Lanes",
+      shortDescription: "A sparse board with two strong chord corridors that encourage lane control, timing, and contested expansion.",
+      longDescription: "Split Lanes creates the feeling of two major battle routes across the board. Premium spaces are separated enough to avoid clutter, but the structure still nudges players into choosing a side, contesting development paths, and planning upgrades across mirrored chord corridors.",
+      layout: [
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"],
+        ["--","DC","--","--","TN","--","--","--","--","--","TN","--","--","DC","--"],
+        ["--","--","DC","--","--","DN","--","--","--","DN","--","--","DC","--","--"],
+        ["DN","--","--","--","--","--","DN","--","DN","--","--","--","--","--","DN"],
+        ["--","TN","--","--","DC","--","--","--","--","--","DC","--","--","TN","--"],
+        ["--","--","DN","--","--","DN","--","--","--","DN","--","--","DN","--","--"],
+        ["--","--","--","DN","--","--","--","--","--","--","--","DN","--","--","--"],
+        ["TC","--","--","--","DN","--","--","--","--","--","DN","--","--","--","TC"],
+        ["--","--","--","DN","--","--","--","--","--","--","--","DN","--","--","--"],
+        ["--","--","DN","--","--","DN","--","--","--","DN","--","--","DN","--","--"],
+        ["--","TN","--","--","DC","--","--","--","--","--","DC","--","--","TN","--"],
+        ["DN","--","--","--","--","--","DN","--","DN","--","--","--","--","--","DN"],
+        ["--","--","DC","--","--","DN","--","--","--","DN","--","--","DC","--","--"],
+        ["--","DC","--","--","TN","--","--","--","--","--","TN","--","--","DC","--"],
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"]
+      ]
+    },
+    {
+      id: "elite-mode",
+      name: "Elite Mode",
+      shortDescription: "An extremely sparse, high-discipline board where every premium square matters and patience is everything.",
+      longDescription: "Elite Mode strips the board down to its essentials. Premium spaces are rare, powerful, and far apart. This variant rewards sharp tactical judgment, efficient use of natural board flow, and careful timing of your strongest chords. It is the cleanest and most unforgiving option of the group.",
+      layout: [
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"],
+        ["--","--","--","--","TN","--","--","--","--","--","TN","--","--","--","--"],
+        ["--","--","DC","--","--","--","--","--","--","--","--","--","DC","--","--"],
+        ["DN","--","--","--","--","--","--","--","--","--","--","--","--","--","DN"],
+        ["--","TN","--","--","--","--","--","--","--","--","--","--","--","TN","--"],
+        ["--","--","--","--","--","DN","--","--","--","DN","--","--","--","--","--"],
+        ["--","--","DN","--","--","--","--","--","--","--","--","--","DN","--","--"],
+        ["TC","--","--","--","--","--","--","DC","--","--","--","--","--","--","TC"],
+        ["--","--","DN","--","--","--","--","--","--","--","--","--","DN","--","--"],
+        ["--","--","--","--","--","DN","--","--","--","DN","--","--","--","--","--"],
+        ["--","TN","--","--","--","--","--","--","--","--","--","--","--","TN","--"],
+        ["DN","--","--","--","--","--","--","--","--","--","--","--","--","--","DN"],
+        ["--","--","DC","--","--","--","--","--","--","--","--","--","DC","--","--"],
+        ["--","--","--","--","TN","--","--","--","--","--","TN","--","--","--","--"],
+        ["TC","--","--","DN","--","--","--","TC","--","--","--","DN","--","--","TC"]
+      ]
+    }
+  ];
+
+  CT.DEFAULT_BOARD_VARIANT_ID = "pure-balance";
+
+  CT.getBoardVariantById = function (variantId) {
+    for (var i = 0; i < CT.BOARD_VARIANTS.length; i++) {
+      if (CT.BOARD_VARIANTS[i].id === variantId) return CT.BOARD_VARIANTS[i];
+    }
+    return CT.BOARD_VARIANTS[0];
   };
 })();
