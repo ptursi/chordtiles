@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chord Tiles</title>
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
 
@@ -41,13 +41,37 @@
     </div>
   </section>
 
+  <!-- ═══════════════════ BOARD SELECTION MODAL ═══════════════════ -->
+  <div id="boardSelectModal" class="modal board-select-modal" aria-hidden="true">
+    <div class="modal-card modal-wide">
+      <p class="modal-eyebrow">Step 1 of 2 · Choose Your Board</p>
+      <h2>Select a Board</h2>
+      <p class="modal-copy">Each board offers a distinct strategic experience. Choose your battlefield before setting up players and rules.</p>
+      <div id="boardCardGrid" class="board-card-grid"></div>
+      <div class="settings-footer">
+        <button id="boardSelectContinueBtn" class="btn-primary btn-large" type="button" disabled>Continue to Settings →</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════ SETUP MODAL ═══════════════════ -->
   <div id="setupModal" class="modal" aria-hidden="true">
     <div class="modal-card modal-wide">
       <button id="closeSetupModal" class="close-btn" type="button" aria-label="Close">&times;</button>
-      <p class="modal-eyebrow">Game Setup</p>
-      <h2>Chord Tiles Settings</h2>
+      <p class="modal-eyebrow">Step 2 of 2 · Game Settings</p>
+      <h2>Game Settings</h2>
       <p class="modal-copy">Choose your players, rules, and sound preferences before the first tile drops.</p>
+
+      <div id="setupBoardSummary" class="setup-board-summary">
+        <div class="setup-board-info">
+          <span class="setup-board-step">Step 2 of 2 · Game Settings</span>
+          <div class="setup-board-selected">
+            <strong id="setupBoardName">Pure Balance</strong>
+            <span id="setupBoardDesc">An ultra-sparse board with rare power spikes and clean, readable strategy.</span>
+          </div>
+        </div>
+        <button id="setupBackBtn" class="btn-secondary btn-small" type="button">← Change Board</button>
+      </div>
 
       <form id="setupForm">
         <div class="settings-grid">
@@ -128,6 +152,11 @@
               <input type="checkbox" id="enableTileSwap" checked />
               <span>Allow tile swapping</span>
             </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="enableBlockedSpaces" checked />
+              <span>Enable blocked spaces</span>
+            </label>
+            <p class="setting-help">Adds symmetrical obstacle squares that break chord lines and increase replayability.</p>
           </section>
         </div>
 
@@ -292,12 +321,12 @@
     </div>
   </div>
 
-  <script src="data.js?v=4"></script>
-  <script src="state.js?v=4"></script>
-  <script src="chord-engine.js?v=4"></script>
-  <script src="scoring.js?v=4"></script>
-  <script src="audio.js?v=4"></script>
-  <script src="ui.js?v=4"></script>
-  <script src="game.js?v=4"></script>
+  <script src="data.js?v=5"></script>
+  <script src="state.js?v=5"></script>
+  <script src="chord-engine.js?v=5"></script>
+  <script src="scoring.js?v=5"></script>
+  <script src="audio.js?v=5"></script>
+  <script src="ui.js?v=5"></script>
+  <script src="game.js?v=5"></script>
 </body>
 </html>
