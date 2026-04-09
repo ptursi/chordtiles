@@ -197,6 +197,9 @@
     // Clear group highlights
     CT.ui.highlightGroups(null, null);
 
+    // Show triads-blocked cells based on the current locked board state
+    CT.ui.updateTriadsBlocking();
+
     // Start timer if enabled
     if (CT.state.settings.enableTimedTurns) {
       startTimer(CT.state.settings.timedTurnSeconds);
@@ -219,6 +222,7 @@
           CT.ui.updateCell(r, c);
         }
       }
+      CT.ui.updateTriadsBlocking();
       return;
     }
 
@@ -235,6 +239,7 @@
     }
 
     CT.ui.updatePreview(validation, scoreResult);
+    CT.ui.updateTriadsBlocking();
   }
 
   /* ── Confirm move ───────────────────────────────────────────────────── */
