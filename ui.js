@@ -50,6 +50,7 @@
     els.setupBoardDesc = document.getElementById("setupBoardDesc");
     els.setupBackBtn = document.getElementById("setupBackBtn");
     els.enableBlockedSpaces = document.getElementById("enableBlockedSpaces");
+    els.triadsOnlyMode = document.getElementById("triadsOnlyMode");
 
     els.gameContainer = document.getElementById("gameContainer");
     els.board = document.getElementById("board");
@@ -221,6 +222,59 @@
     positions.forEach(function (p) { CT.ui.updateCell(p.row, p.col); });
   };
 
+  /**
+   * In Triads Only mode, mark empty cells that would extend any existing tile
+   * group beyond 3 tiles as visually blocked (dark, like actual blocked squares).
+   * Considers all tiles currently on the board (locked + placed this turn).
+   * Call this whenever the board state changes.
+   */
+  CT.ui.updateTriadsBlocking = function () {
+    for (var r = 0; r < 15; r++) {
+      for (var c = 0; c < 15; c++) {
+        var div = cellElements[r] && cellElements[r][c];
+        if (!div) continue;
+        div.classList.remove("cell-triads-blocked");
+
+        if (!CT.state || !CT.state.settings.triadsOnlyMode) continue;
+
+        var cell = CT.state.board[r][c];
+        // Only check cells that are empty and not already physically blocked
+        if (cell.tile || cell.isBlocked) continue;
+
+        // Count contiguous tiles to the left
+        var left = 0;
+        for (var cc = c - 1; cc >= 0; cc--) {
+          if (CT.state.board[r][cc].tile) left++;
+          else break;
+        }
+        // Count contiguous tiles to the right
+        var right = 0;
+        for (var cc2 = c + 1; cc2 < 15; cc2++) {
+          if (CT.state.board[r][cc2].tile) right++;
+          else break;
+        }
+        // Count contiguous tiles above
+        var up = 0;
+        for (var rr = r - 1; rr >= 0; rr--) {
+          if (CT.state.board[rr][c].tile) up++;
+          else break;
+        }
+        // Count contiguous tiles below
+        var down = 0;
+        for (var rr2 = r + 1; rr2 < 15; rr2++) {
+          if (CT.state.board[rr2][c].tile) down++;
+          else break;
+        }
+
+        // Placing here would create a group of (left+1+right) horizontally
+        // or (up+1+down) vertically. Block if either would exceed 3.
+        if (left + right >= 3 || up + down >= 3) {
+          div.classList.add("cell-triads-blocked");
+        }
+      }
+    }
+  };
+
   CT.ui.highlightGroups = function (groups, chordResults) {
     // Clear all group highlights
     for (var r = 0; r < 15; r++) {
@@ -360,8 +414,10 @@
       }
     }
 
-    // If we have a selected rack tile and cell is empty, place it
-    if (selectedRackTile && !cell.tile && !cell.isBlocked) {
+    // If we have a selected rack tile and cell is empty (and not triads-blocked), place it
+    var cellDiv2 = e.currentTarget;
+    if (selectedRackTile && !cell.tile && !cell.isBlocked &&
+        !cellDiv2.classList.contains("cell-triads-blocked")) {
       var tile = selectedRackTile;
       selectedRackTile = null;
 
@@ -428,6 +484,7 @@
         if (target) {
           var cellDiv = target.closest(".cell");
           if (cellDiv && !cellDiv.classList.contains("cell-blocked") &&
+              !cellDiv.classList.contains("cell-triads-blocked") &&
               !cellDiv.classList.contains("cell-has-tile")) {
             cellDiv.classList.add("cell-drop-target");
             dragState.targetCell = cellDiv;
@@ -946,7 +1003,8 @@
       playbackMode: els.playbackMode.value,
       enableTileSwap: els.enableTileSwap.checked,
       selectedBoardVariantId: selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID,
-      enableBlockedSpaces: els.enableBlockedSpaces ? els.enableBlockedSpaces.checked : true
+      enableBlockedSpaces: els.enableBlockedSpaces ? els.enableBlockedSpaces.checked : true,
+      triadsOnlyMode: els.triadsOnlyMode ? els.triadsOnlyMode.checked : false
     };
   };
 
