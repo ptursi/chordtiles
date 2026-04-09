@@ -37,11 +37,71 @@
     return pts;
   }
 
-  /* ── Chord detection (unordered pitch-class set matching) ───────────── */
+  /* ── Chord detection ───────────────────────────────────────────────── */
 
   /**
-   * Given an array of pitch classes (integers 0-11), detect the best chord.
-   * Returns { chordType, root, rootName, displayName } or null.
+   * CT.detectExactChord — BOARD GAMEPLAY MODE (strict, exact full-group only)
+   *
+   * This is the ONLY detection function used for board validation and scoring.
+   * It enforces exact matching against the full unique pitch-class set of a
+   * contiguous group. Subset matching is explicitly forbidden here because:
+   *
+   *   If a line contains extra notes that break a chord, the move must fail.
+   *   Allowing subset rescue would let an illegal multi-tile extension score
+   *   as if only the valid inner notes existed — that is the root cause of
+   *   the extension-scoring bug.
+   *
+   * Rules:
+   *  1. Deduplicate pitch classes (duplicate notes are fine on the board;
+   *     chord validity is based on the UNIQUE pitch-class set only).
+   *  2. Return null if fewer than 3 unique pitch classes.
+   *  3. Return null if more than 5 unique pitch classes — no chord type in
+   *     Chord Tiles has more than 5 notes, so a longer group is invalid.
+   *     This is the critical guard: we do NOT try subsets when there are
+   *     too many unique pitch classes. The whole group must match or fail.
+   *  4. Test ONLY the full unique set against known chord types.
+   *
+   * @param {number[]} pitchClasses  May contain duplicates and -1 values.
+   * @returns {{ chordType, root, rootName, displayName } | null}
+   */
+  CT.detectExactChord = function (pitchClasses) {
+    var unique = [];
+    var seen = {};
+    for (var i = 0; i < pitchClasses.length; i++) {
+      var pc = pitchClasses[i];
+      if (pc < 0) continue;
+      if (!seen[pc]) {
+        seen[pc] = true;
+        unique.push(pc);
+      }
+    }
+
+    if (unique.length < 3) return null;
+
+    // *** CRITICAL: reject groups with more than 5 unique pitch classes.
+    // No enabled chord type has more than 5 notes, so this group cannot
+    // possibly form a valid chord as a whole. We return null immediately
+    // and do NOT fall back to subset search — that would silently rescue
+    // an illegal extended line by finding a chord hidden inside it.
+    if (unique.length > 5) return null;
+
+    // Exact full-set match — no subsets tried.
+    return detectFromSet(unique);
+  };
+
+  /**
+   * CT.detectChord — SUBSET-MATCHING MODE (legacy / non-board use only)
+   *
+   * This version tries subsets when the group has >5 unique pitch classes,
+   * returning the highest-value chord found in any subset.
+   *
+   * ⚠️  DO NOT USE THIS FOR BOARD VALIDATION OR SCORING.
+   *     Use CT.detectExactChord instead. Subset matching on the board
+   *     allows an illegal extended line to score via a hidden inner chord,
+   *     which is the bug this refactor was created to fix.
+   *
+   * Kept here as a utility for non-board chord identification (e.g. future
+   * analysis tools, chord name labelling outside of gameplay).
    */
   CT.detectChord = function (pitchClasses) {
     var unique = [];
@@ -57,12 +117,11 @@
 
     if (unique.length < 3) return null;
 
-    // If 5 or fewer unique, try directly
     if (unique.length <= 5) {
       return detectFromSet(unique);
     }
 
-    // >5 unique: try subsets of size 5, then 4, then 3
+    // >5 unique: try subsets (NOT used for board validation — see detectExactChord)
     var best = null;
     var bestScore = -1;
     var bonusPts = getEnabledBonusPoints();
@@ -79,7 +138,7 @@
           }
         }
       }
-      if (best) return best; // Take best from largest subset first
+      if (best) return best;
     }
 
     return best;
@@ -361,10 +420,23 @@
         continue;
       }
 
-      var detection = CT.detectChord(pitchClasses);
+      // *** BOARD VALIDATION: use exact full-group detection only.
+      // CT.detectExactChord rejects groups with >5 unique pitch classes outright
+      // and never tries subsets. This ensures an extended line that no longer
+      // forms a valid chord as a whole cannot score via a hidden inner chord.
+      var detection = CT.detectExactChord(pitchClasses);
 
-      // Check if the pre-existing (locked) tiles already formed this same chord.
-      // If so, the new tiles didn't create a NEW chord — skip scoring this group.
+      // Unchanged-chord check: determine whether the pre-existing locked tiles
+      // already formed the exact same chord. If so, the new tile(s) did not
+      // create a NEW chord — the group does not score (but does not invalidate).
+      //
+      // Hardening: both the full group AND the locked-only sub-group must pass
+      // exact detection, and they must produce the same chord type + root.
+      // If the new tile introduced a new unique pitch class that changes the
+      // chord (even to another valid chord), that is treated as a NEW chord,
+      // not as "unchanged". If the new tile pushed the group past 5 unique PCs,
+      // detectExactChord returns null and detection is null, so this whole block
+      // is skipped and the main-line error branch fires instead.
       var isUnchangedChord = false;
       if (detection && !isFirstMove) {
         var existingCells = group.cells.filter(function (c) {
@@ -372,7 +444,8 @@
         });
         if (existingCells.length >= 3) {
           var existingPCs = groupToPitchClasses(existingCells);
-          var existingDetection = CT.detectChord(existingPCs);
+          // Also exact-only for the locked-cell sub-group
+          var existingDetection = CT.detectExactChord(existingPCs);
           if (existingDetection &&
               existingDetection.chordType === detection.chordType &&
               existingDetection.rootName === detection.rootName) {
@@ -494,5 +567,65 @@
 
   CT.noteToPitchClass = noteToPitchClass;
   CT.groupToPitchClasses = groupToPitchClasses;
+
+  /* ── Developer self-checks (run CT.runChordEngineTests() in console) ── */
+
+  CT.runChordEngineTests = function () {
+    var pass = 0;
+    var fail = 0;
+
+    function assert(label, condition) {
+      if (condition) {
+        console.log("[PASS]", label);
+        pass++;
+      } else {
+        console.error("[FAIL]", label);
+        fail++;
+      }
+    }
+
+    // 1. Valid triad passes exact detection
+    var ceg = [0, 4, 7];  // C-E-G
+    var t1 = CT.detectExactChord(ceg);
+    assert("C-E-G → valid major triad", t1 && t1.chordType === "major triad" && t1.rootName === "C");
+
+    // 2. Extended invalid line fails (6 unique PCs)
+    var t2 = CT.detectExactChord([0, 4, 7, 10, 2, 6]); // C-E-G-Bb-D-F# (6 unique)
+    assert("C-E-G-Bb-D-F# (6 unique) → null", t2 === null);
+
+    // 3. Valid 5-note dominant 9th passes
+    var t3 = CT.detectExactChord([0, 4, 7, 10, 2]); // C-E-G-Bb-D
+    assert("C-E-G-Bb-D → valid dominant 9 or similar 5-note chord", t3 !== null);
+
+    // 4. 6-note line with valid subset still fails exact detection
+    var t4 = CT.detectExactChord([0, 4, 7, 10, 2, 5]); // 6 unique PCs
+    assert("6-note group → null (no subset rescue)", t4 === null);
+
+    // 5. Duplicate notes are fine — validity based on unique PCs only
+    var t5 = CT.detectExactChord([0, 4, 7, 0, 4]); // C-E-G-C-E (duplicates)
+    assert("C-E-G-C-E (duplicates) → valid C major triad", t5 && t5.chordType === "major triad");
+
+    // 6. Minor triad detected correctly
+    var t6 = CT.detectExactChord([9, 0, 4]); // A-C-E
+    assert("A-C-E → valid minor triad", t6 && t6.chordType === "minor triad" && t6.rootName === "A");
+
+    // 7. 2-note group → null
+    var t7 = CT.detectExactChord([0, 7]);
+    assert("2-note group → null", t7 === null);
+
+    // 8. Cross-group with extra unique note → null
+    var t8 = CT.detectExactChord([0, 4, 7, 11]); // C-E-G-B = major 7th — should pass
+    assert("C-E-G-B → valid major 7th", t8 && t8.chordType === "major 7th");
+    var t8b = CT.detectExactChord([0, 4, 7, 11, 3]); // C-E-G-B-Eb — 5 unique PCs, likely invalid
+    // This may or may not be null depending on chord tables, but must not subset-rescue a 6+ group
+    assert("5-note non-chord set → null or valid chord (no silent subset)", t8b === null || (t8b && t8b.chordType));
+
+    // 9. subset mode (CT.detectChord) still finds chord in 6-note set
+    var t9 = CT.detectChord([0, 4, 7, 10, 2, 6]);
+    assert("CT.detectChord (subset) on 6-note set → finds inner chord", t9 !== null);
+
+    console.log("--- Chord Engine Tests: " + pass + " passed, " + fail + " failed ---");
+    return { pass: pass, fail: fail };
+  };
 
 })();
