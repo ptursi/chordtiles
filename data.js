@@ -227,7 +227,8 @@
     playbackMode: "harmonic",
     enableTileSwap: true,
     selectedBoardVariantId: "pure-balance",
-    enableBlockedSpaces: true
+    enableBlockedSpaces: true,
+    triadsOnlyMode: false
   };
 
   /* ── Board Variants ─────────────────────────────────────────────────── */
