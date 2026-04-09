@@ -786,7 +786,7 @@
   /* ── Setup form helpers ─────────────────────────────────────────────── */
 
   function syncPlayerNames(count) {
-    count = Math.max(2, Math.min(4, count));
+    count = Math.max(1, Math.min(6, count));
     els.playerNamesContainer.innerHTML = "";
     for (var i = 0; i < count; i++) {
       var input = document.createElement("input");
@@ -820,7 +820,7 @@
   };
 
   CT.ui.getSetupSettings = function () {
-    var count = Math.max(2, Math.min(4, parseInt(els.numPlayers.value) || 2));
+    var count = Math.max(1, Math.min(6, parseInt(els.numPlayers.value) || 2));
     var names = [];
     var inputs = els.playerNamesContainer.querySelectorAll("input");
     for (var i = 0; i < count; i++) {
