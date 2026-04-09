@@ -21,6 +21,7 @@
     CT.ui.bindConfirmModal();
     bindGameEvents();
     bindButtonEvents();
+    initBoardPinchZoom();
   });
 
   /* ── Event bindings ─────────────────────────────────────────────────── */
@@ -511,6 +512,52 @@
     var on = els.midEarTraining.checked;
     els.midPlaybackMode.disabled = !on;
     els.midPlaybackMode.style.opacity = on ? "" : "0.4";
+  }
+
+  /* ── Board pinch-to-zoom ─────────────────────────────────────────────── */
+
+  function initBoardPinchZoom() {
+    var wrapper = document.getElementById("boardWrapper");
+    if (!wrapper) return;
+
+    var currentScale = 1;
+    var lastScale = 1;
+    var startDist = 0;
+    var isPinching = false;
+
+    function getTouchDist(touches) {
+      var dx = touches[0].clientX - touches[1].clientX;
+      var dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    wrapper.addEventListener("touchstart", function (e) {
+      if (e.touches.length === 2) {
+        isPinching = true;
+        startDist = getTouchDist(e.touches);
+        lastScale = currentScale;
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    wrapper.addEventListener("touchmove", function (e) {
+      if (e.touches.length === 2 && isPinching) {
+        var newDist = getTouchDist(e.touches);
+        var scale = lastScale * (newDist / startDist);
+        scale = Math.max(0.5, Math.min(3.0, scale));
+        currentScale = scale;
+        wrapper.style.transformOrigin = "center center";
+        wrapper.style.transform = "scale(" + currentScale + ")";
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    wrapper.addEventListener("touchend", function (e) {
+      if (e.touches.length < 2) {
+        isPinching = false;
+        lastScale = currentScale;
+      }
+    });
   }
 
 })();
