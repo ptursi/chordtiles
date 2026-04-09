@@ -75,14 +75,17 @@
 
   /* ── Board generation ───────────────────────────────────────────────── */
 
-  function generateBoard(blockedLayoutIndex) {
+  function generateBoard(settings, blockedLayoutIndex) {
+    var variantId = (settings && settings.selectedBoardVariantId) || CT.DEFAULT_BOARD_VARIANT_ID;
+    var variant = CT.getBoardVariantById(variantId);
+    var layout = variant ? variant.layout : null;
     var size = CT.BOARD_SIZE;
     var board = [];
     for (var r = 0; r < size; r++) {
       board[r] = [];
       for (var c = 0; c < size; c++) {
-        var raw = CT.PREMIUM_BOARD[r][c];
-        var premiumType = raw === "--" ? null : raw;
+        var raw = layout ? layout[r][c] : "--";
+        var premiumType = (raw === "--") ? null : raw;
         board[r][c] = {
           row: r,
           col: c,
@@ -94,16 +97,17 @@
       }
     }
 
-    // Apply blocked overlay
-    var layout = CT.BLOCKED_LAYOUTS[blockedLayoutIndex];
-    if (layout) {
-      layout.forEach(function (pos) {
-        var cell = board[pos[0]][pos[1]];
-        // Only block normal squares, never premium
-        if (!cell.premiumType) {
-          cell.isBlocked = true;
-        }
-      });
+    // Apply blocked overlay only if enabled and index is valid
+    if (blockedLayoutIndex >= 0) {
+      var blockedLayout = CT.BLOCKED_LAYOUTS[blockedLayoutIndex];
+      if (blockedLayout) {
+        blockedLayout.forEach(function (pos) {
+          var cell = board[pos[0]][pos[1]];
+          if (!cell.premiumType) {
+            cell.isBlocked = true;
+          }
+        });
+      }
     }
 
     return board;
@@ -127,9 +131,12 @@
   CT.createInitialState = function (settings) {
     nextTileId = 1;
     var s = JSON.parse(JSON.stringify(settings));
-    var blockedLayoutIndex = Math.floor(Math.random() * CT.BLOCKED_LAYOUTS.length);
+    var enableBlocked = s.enableBlockedSpaces !== false;
+    var blockedLayoutIndex = enableBlocked
+      ? Math.floor(Math.random() * CT.BLOCKED_LAYOUTS.length)
+      : -1;
     var bag = buildBag(s.includeAccidentals);
-    var board = generateBoard(blockedLayoutIndex);
+    var board = generateBoard(s, blockedLayoutIndex);
 
     var players = [];
     for (var i = 0; i < s.numberOfPlayers; i++) {
