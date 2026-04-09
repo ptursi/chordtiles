@@ -1,0 +1,516 @@
+/* ========================================================================
+   game.js — Chord Tiles — Turn Lifecycle & Orchestrator
+   ======================================================================== */
+(function () {
+  "use strict";
+  var CT = window.CT;
+
+  var timerInterval = null;
+  var timerDeadline = null;
+  var timerStarted = false;
+  var lastScoreResult = null;
+  var lastAllChordData = null;
+  var isFirstTurn = true;
+
+  /* ── Initialization ─────────────────────────────────────────────────── */
+
+  document.addEventListener("DOMContentLoaded", function () {
+    CT.ui.cacheElements();
+    CT.ui.initSetupDefaults();
+    CT.ui.bindSetupForm();
+    CT.ui.bindConfirmModal();
+    bindGameEvents();
+    bindButtonEvents();
+  });
+
+  /* ── Event bindings ─────────────────────────────────────────────────── */
+
+  function bindButtonEvents() {
+    var els = CT.ui.els();
+
+    // Landing -> Setup
+    els.launchGameBtn.addEventListener("click", function () {
+      CT.ui.hideLanding();
+      CT.ui.showSetup();
+    });
+
+    // Setup form submit
+    els.setupForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      handleStartGame();
+    });
+
+    els.closeSetupModal.addEventListener("click", function () {
+      CT.ui.hideSetup();
+      if (!CT.state) {
+        // Show landing again
+        els.landingScreen.classList.add("is-open");
+      }
+    });
+
+    // Confirm move
+    els.confirmMoveBtn.addEventListener("click", handleConfirmMove);
+
+    // Pass turn
+    els.passTurnBtn.addEventListener("click", handlePassTurn);
+
+    // Swap tiles
+    els.swapTilesBtn.addEventListener("click", handleSwapTiles);
+    els.swapConfirmBtn.addEventListener("click", function () {
+      var selected = CT.ui.getSwapSelected();
+      if (selected.length === 0) return;
+      CT.ui.closeModal(els.swapModal);
+      CT.recallAllTiles();
+      CT.swapTiles(selected);
+      finishTurn(null, "Swapped " + selected.length + " tile" + (selected.length > 1 ? "s" : "") + ".");
+    });
+    els.swapCancelBtn.addEventListener("click", function () {
+      CT.ui.closeModal(els.swapModal);
+    });
+    els.closeSwapModal.addEventListener("click", function () {
+      CT.ui.closeModal(els.swapModal);
+    });
+
+    // Shuffle rack
+    els.shuffleRackBtn.addEventListener("click", function () {
+      CT.shuffleRack();
+      CT.ui.renderRack();
+    });
+
+    // Recall tiles
+    els.recallTilesBtn.addEventListener("click", function () {
+      CT.recallAllTiles();
+      CT.ui.renderRack();
+      refreshAfterPlacementChange();
+    });
+
+    // Start turn (pass device)
+    els.startTurnBtn.addEventListener("click", function () {
+      CT.ui.hidePassDevice();
+      beginPlayerTurn();
+    });
+
+    // Turn summary replay
+    els.turnSummaryReplay.addEventListener("click", function () {
+      if (lastAllChordData && lastAllChordData.length > 0) {
+        playAllChords(lastAllChordData, CT.state.settings.playbackMode);
+      }
+    });
+
+    // Settings (mid-game)
+    els.settingsBtn.addEventListener("click", function () {
+      pauseTimer();
+      populateMidSettings();
+      CT.ui.openModal(els.settingsModal);
+    });
+
+    els.closeSettingsModal.addEventListener("click", function () {
+      CT.ui.closeModal(els.settingsModal);
+      resumeTimer();
+    });
+
+    els.saveSettingsBtn.addEventListener("click", function () {
+      applyMidSettings();
+      CT.ui.closeModal(els.settingsModal);
+      resumeTimer();
+    });
+
+    els.midEarTraining.addEventListener("change", syncMidEarTrainingState);
+
+    els.midRestartBtn.addEventListener("click", function () {
+      CT.ui.closeModal(els.settingsModal);
+      CT.ui.showConfirm({
+        eyebrow: "Restart",
+        title: "Restart the game?",
+        message: "All scores and progress will be lost.",
+        confirmText: "Restart",
+        onConfirm: function () {
+          startGameWithSettings(CT.state.settings);
+        }
+      });
+    });
+
+    els.midNewGameBtn.addEventListener("click", function () {
+      CT.ui.closeModal(els.settingsModal);
+      CT.ui.showConfirm({
+        eyebrow: "New game",
+        title: "Start a new game?",
+        message: "Return to the setup screen with new settings.",
+        confirmText: "New Game",
+        onConfirm: function () {
+          clearTimer();
+          CT.state = null;
+          CT.ui.showSetup();
+        }
+      });
+    });
+
+    // Game over -> new game
+    els.gameOverNewGame.addEventListener("click", function () {
+      CT.ui.closeModal(els.gameOverModal);
+      CT.ui.showSetup();
+    });
+  }
+
+  function bindGameEvents() {
+    CT.on("placement-changed", refreshAfterPlacementChange);
+  }
+
+  /* ── Start game ─────────────────────────────────────────────────────── */
+
+  function handleStartGame() {
+    var settings = CT.ui.getSetupSettings();
+    CT.ui.hideSetup();
+    startGameWithSettings(settings);
+  }
+
+  function startGameWithSettings(settings) {
+    clearTimer();
+    isFirstTurn = true;
+    CT.createInitialState(settings);
+    CT.ui.hideLanding();
+    CT.ui.showGame();
+    CT.ui.buildBoard();
+    beginPlayerTurn();
+  }
+
+  /* ── Begin player turn ──────────────────────────────────────────────── */
+
+  function beginPlayerTurn() {
+    CT.ui.renderRack();
+    CT.ui.renderScoreboard();
+    CT.ui.renderTurnInfo();
+    CT.ui.updatePreview(null, null);
+
+    // Clear group highlights
+    CT.ui.highlightGroups(null, null);
+
+    // Start timer if enabled
+    if (CT.state.settings.enableTimedTurns) {
+      startTimer(CT.state.settings.timedTurnSeconds);
+    }
+
+    var els = CT.ui.els();
+    els.confirmMoveBtn.disabled = true;
+  }
+
+  /* ── Placement changed ──────────────────────────────────────────────── */
+
+  function refreshAfterPlacementChange() {
+    var placed = CT.getPlacedTilePositions();
+
+    if (placed.length === 0) {
+      CT.ui.updatePreview(null, null);
+      // Update all cells (in case tiles were recalled)
+      for (var r = 0; r < 15; r++) {
+        for (var c = 0; c < 15; c++) {
+          CT.ui.updateCell(r, c);
+        }
+      }
+      return;
+    }
+
+    var validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
+    var scoreResult = null;
+
+    if (validation.valid) {
+      scoreResult = CT.calculateTurnScore(
+        validation.chordResults,
+        validation.groups,
+        CT.state.board,
+        placed
+      );
+    }
+
+    CT.ui.updatePreview(validation, scoreResult);
+  }
+
+  /* ── Confirm move ───────────────────────────────────────────────────── */
+
+  function handleConfirmMove() {
+    var placed = CT.getPlacedTilePositions();
+    if (placed.length === 0) return;
+
+    var validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
+    if (!validation.valid) return;
+
+    var scoreResult = CT.calculateTurnScore(
+      validation.chordResults,
+      validation.groups,
+      CT.state.board,
+      placed
+    );
+
+    clearTimer();
+
+    // Confirm placement (locks tiles, awards score, refills rack)
+    CT.confirmPlacement(scoreResult);
+
+    // Always build chord data for replay button
+    if (scoreResult.chords.length > 0) {
+      var allChordData = [];
+      for (var ci = 0; ci < validation.chordResults.length; ci++) {
+        var notes = getNotesFromGroup(validation.chordResults[ci]);
+        allChordData.push({ notes: notes, chordType: scoreResult.chords[ci].chordType });
+      }
+      lastAllChordData = allChordData;
+
+      // Auto-play chords on confirm if ear training is on
+      if (CT.state.settings.enableEarTraining && CT.state.settings.autoPlayChordOnConfirm) {
+        playAllChords(allChordData, CT.state.settings.playbackMode);
+      } else {
+        CT.playSoundEffect("confirm");
+      }
+    } else {
+      CT.playSoundEffect("confirm");
+      lastAllChordData = null;
+    }
+
+    lastScoreResult = scoreResult;
+
+    // Build turn summary
+    var summary = buildTurnSummary(scoreResult);
+
+    finishTurn(scoreResult, summary);
+  }
+
+  function getNotesFromGroup(chordResult) {
+    if (!chordResult || !chordResult.group) return [];
+    return chordResult.group.cells
+      .filter(function (c) { return c.tile; })
+      .map(function (c) { return CT.getEffectiveNote(c.tile); })
+      .filter(function (n) { return n; });
+  }
+
+  /* ── Pass turn ──────────────────────────────────────────────────────── */
+
+  function handlePassTurn() {
+    CT.ui.showConfirm({
+      eyebrow: "Pass",
+      title: "Pass your turn?",
+      message: "You will not place any tiles this turn.",
+      confirmText: "Pass",
+      cancelText: "Cancel",
+      onConfirm: function () {
+        clearTimer();
+        CT.recallAllTiles();
+        CT.passTurn();
+        finishTurn(null, CT.currentPlayer().name + " passed.");
+      }
+    });
+  }
+
+  /* ── Swap tiles ─────────────────────────────────────────────────────── */
+
+  function handleSwapTiles() {
+    if (CT.getBagCount() === 0) {
+      CT.ui.showConfirm({
+        eyebrow: "Cannot swap",
+        title: "Bag is empty",
+        message: "There are no tiles left in the bag to swap with.",
+        confirmText: "OK"
+      });
+      return;
+    }
+    CT.recallAllTiles();
+    refreshAfterPlacementChange();
+    CT.ui.showSwapModal();
+  }
+
+  /* ── Finish turn / advance ──────────────────────────────────────────── */
+
+  function finishTurn(scoreResult, summaryText) {
+    // Check win condition
+    var winResult = CT.checkWinCondition();
+
+    if (winResult) {
+      CT.state.phase = "GAME_OVER";
+      CT.playSoundEffect("win");
+      CT.ui.renderScoreboard();
+      CT.ui.showGameOver(winResult);
+      return;
+    }
+
+    // Advance to next player
+    var prevPlayerIndex = CT.state.currentPlayerIndex;
+    CT.advanceTurn();
+    var nextPlayerIndex = CT.state.currentPlayerIndex;
+
+    // Check win after round advance (for round-limit mode)
+    var postAdvanceWin = CT.checkWinCondition();
+    if (postAdvanceWin) {
+      CT.state.phase = "GAME_OVER";
+      CT.playSoundEffect("win");
+      CT.ui.renderScoreboard();
+      CT.ui.showGameOver(postAdvanceWin);
+      return;
+    }
+
+    // Show pass device screen
+    isFirstTurn = false;
+    var hasChords = scoreResult && scoreResult.chords && scoreResult.chords.length > 0;
+    CT.ui.showPassDevice(summaryText, nextPlayerIndex, hasChords);
+    CT.ui.renderScoreboard();
+  }
+
+  function buildTurnSummary(scoreResult) {
+    var player = CT.state.players[CT.state.currentPlayerIndex];
+    var html = "";
+
+    if (scoreResult) {
+      html += '<p class="summary-header"><strong>' + esc(player.name) + '</strong> scored <strong>' + scoreResult.totalScore + ' points</strong>.</p>';
+      scoreResult.chords.forEach(function (c) {
+        html += '<div class="summary-chord-block">';
+        html += '<span class="summary-chord-name">' + esc(c.displayName) + '</span>';
+        html += '<span class="summary-line">Chord Points: <strong>+' + c.chordBonus + '</strong></span>';
+        html += '<span class="summary-line">Tile Points: <strong>+' + c.tilePoints + '</strong></span>';
+        if (c.premiumBonus > 0) {
+          html += '<span class="summary-line">Premium Bonus: <strong>+' + c.premiumBonus + '</strong></span>';
+        }
+        html += '<span class="summary-line summary-total">= <strong>' + c.groupScore + ' points</strong></span>';
+        html += '</div>';
+      });
+    }
+
+    return html;
+  }
+
+  /**
+   * Play all chords sequentially with delay between them.
+   * Highlights the active chord name in the turn summary.
+   */
+  function playAllChords(allChordData, mode) {
+    if (!allChordData || allChordData.length === 0) return;
+    var chordDuration = (mode === "melodic") ? 1.8 : 1.2;
+
+    allChordData.forEach(function (cd, idx) {
+      var startDelay = idx * chordDuration * 1000;
+      function playAndHighlight() {
+        CT.playChord(cd.notes, cd.chordType, mode);
+        var chordNames = document.querySelectorAll("#turnSummary .summary-chord-name");
+        if (chordNames[idx]) {
+          chordNames[idx].classList.add("is-playing");
+          setTimeout(function () {
+            chordNames[idx].classList.remove("is-playing");
+          }, chordDuration * 1000);
+        }
+      }
+      if (idx === 0) {
+        playAndHighlight();
+      } else {
+        setTimeout(playAndHighlight, startDelay);
+      }
+    });
+  }
+
+  function esc(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  /* ── Turn timer ─────────────────────────────────────────────────────── */
+
+  function startTimer(seconds) {
+    clearTimer();
+    timerStarted = true;
+    timerDeadline = Date.now() + seconds * 1000;
+    var els = CT.ui.els();
+    els.timerDisplay.hidden = false;
+    updateTimerDisplay();
+    timerInterval = setInterval(function () {
+      updateTimerDisplay();
+      if (Date.now() >= timerDeadline) {
+        handleTimerExpired();
+      }
+    }, 200);
+  }
+
+  function updateTimerDisplay() {
+    var els = CT.ui.els();
+    if (!timerStarted) {
+      els.timerDisplay.textContent = "";
+      els.timerDisplay.hidden = true;
+      return;
+    }
+    var remaining = Math.max(0, timerDeadline - Date.now());
+    var secs = Math.ceil(remaining / 1000);
+    var mins = Math.floor(secs / 60);
+    var s = secs % 60;
+    els.timerDisplay.textContent = mins + ":" + (s < 10 ? "0" : "") + s;
+    els.timerDisplay.classList.toggle("is-urgent", remaining <= 10000);
+  }
+
+  function clearTimer() {
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = null;
+    timerDeadline = null;
+    timerStarted = false;
+    var els = CT.ui.els();
+    els.timerDisplay.hidden = true;
+    els.timerDisplay.classList.remove("is-urgent");
+  }
+
+  function pauseTimer() {
+    if (!timerStarted || !timerInterval) return;
+    clearInterval(timerInterval);
+    timerInterval = null;
+    // Store remaining time
+    timerDeadline = Date.now() + Math.max(0, timerDeadline - Date.now());
+  }
+
+  function resumeTimer() {
+    if (!timerStarted || timerInterval) return;
+    var remaining = Math.max(0, timerDeadline - Date.now());
+    timerDeadline = Date.now() + remaining;
+    timerInterval = setInterval(function () {
+      updateTimerDisplay();
+      if (Date.now() >= timerDeadline) {
+        handleTimerExpired();
+      }
+    }, 200);
+  }
+
+  function handleTimerExpired() {
+    clearTimer();
+    // Auto-confirm if valid, otherwise pass
+    var placed = CT.getPlacedTilePositions();
+    if (placed.length > 0) {
+      var validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
+      if (validation.valid) {
+        handleConfirmMove();
+        return;
+      }
+    }
+    // Can't make a valid move, auto-pass
+    CT.recallAllTiles();
+    CT.passTurn();
+    finishTurn(null, CT.currentPlayer().name + "'s time expired. Turn passed.");
+  }
+
+  /* ── Mid-game settings ──────────────────────────────────────────────── */
+
+  function populateMidSettings() {
+    var s = CT.state.settings;
+    var els = CT.ui.els();
+    els.midEarTraining.checked = s.enableEarTraining;
+    els.midPlaybackMode.value = s.playbackMode;
+    syncMidEarTrainingState();
+  }
+
+  function applyMidSettings() {
+    var s = CT.state.settings;
+    var els = CT.ui.els();
+    var earOn = els.midEarTraining.checked;
+    s.enableEarTraining = earOn;
+    s.autoPlayTileOnTap = earOn;
+    s.autoPlayChordOnConfirm = earOn;
+    s.playbackMode = els.midPlaybackMode.value;
+  }
+
+  function syncMidEarTrainingState() {
+    var els = CT.ui.els();
+    var on = els.midEarTraining.checked;
+    els.midPlaybackMode.disabled = !on;
+    els.midPlaybackMode.style.opacity = on ? "" : "0.4";
+  }
+
+})();
