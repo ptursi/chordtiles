@@ -29,10 +29,22 @@
   function bindButtonEvents() {
     var els = CT.ui.els();
 
-    // Landing -> Setup
+    // Landing -> Board select
     els.launchGameBtn.addEventListener("click", function () {
       CT.ui.hideLanding();
+      CT.ui.showBoardSelect();
+    });
+
+    // Board select continue -> Setup
+    els.boardSelectContinueBtn.addEventListener("click", function () {
+      CT.ui.hideBoardSelect();
       CT.ui.showSetup();
+    });
+
+    // Setup back button -> Board select
+    els.setupBackBtn.addEventListener("click", function () {
+      CT.ui.hideSetup();
+      CT.ui.showBoardSelect();
     });
 
     // Setup form submit
@@ -44,8 +56,7 @@
     els.closeSetupModal.addEventListener("click", function () {
       CT.ui.hideSetup();
       if (!CT.state) {
-        // Show landing again
-        els.landingScreen.classList.add("is-open");
+        CT.ui.showBoardSelect();
       }
     });
 
@@ -136,20 +147,20 @@
       CT.ui.showConfirm({
         eyebrow: "New game",
         title: "Start a new game?",
-        message: "Return to the setup screen with new settings.",
+        message: "Return to the board selection screen to start fresh.",
         confirmText: "New Game",
         onConfirm: function () {
           clearTimer();
           CT.state = null;
-          CT.ui.showSetup();
+          CT.ui.showBoardSelect();
         }
       });
     });
 
-    // Game over -> new game
+    // Game over -> board select
     els.gameOverNewGame.addEventListener("click", function () {
       CT.ui.closeModal(els.gameOverModal);
-      CT.ui.showSetup();
+      CT.ui.showBoardSelect();
     });
   }
 
