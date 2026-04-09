@@ -12,6 +12,7 @@
   var rackElements = [];   // cached rack tile divs
   var selectedRackTile = null;
   var dragState = null;
+  var selectedBoardVariantId = null; // set during board selection
 
   CT.ui = {};
 
@@ -40,6 +41,15 @@
     els.playbackMode = document.getElementById("playbackMode");
     els.enableTileSwap = document.getElementById("enableTileSwap");
     els.saveSetupBtn = document.getElementById("saveSetupBtn");
+
+    els.boardSelectModal = document.getElementById("boardSelectModal");
+    els.boardCardGrid = document.getElementById("boardCardGrid");
+    els.boardSelectContinueBtn = document.getElementById("boardSelectContinueBtn");
+    els.setupBoardSummary = document.getElementById("setupBoardSummary");
+    els.setupBoardName = document.getElementById("setupBoardName");
+    els.setupBoardDesc = document.getElementById("setupBoardDesc");
+    els.setupBackBtn = document.getElementById("setupBackBtn");
+    els.enableBlockedSpaces = document.getElementById("enableBlockedSpaces");
 
     els.gameContainer = document.getElementById("gameContainer");
     els.board = document.getElementById("board");
@@ -769,7 +779,13 @@
   };
 
   CT.ui.showSetup = function () {
-    // Sync player name inputs
+    // Update board summary at top of settings
+    var variantId = selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID;
+    var variant = CT.getBoardVariantById(variantId);
+    if (variant && els.setupBoardName) {
+      els.setupBoardName.textContent = variant.name;
+      els.setupBoardDesc.textContent = variant.shortDescription;
+    }
     syncPlayerNames(parseInt(els.numPlayers.value) || 2);
     updateSetupVisibility();
     openModal(els.setupModal);
@@ -778,6 +794,92 @@
   CT.ui.hideSetup = function () {
     closeModal(els.setupModal);
   };
+
+  /* ── Board selection ────────────────────────────────────────────────── */
+
+  CT.ui.showBoardSelect = function () {
+    selectedBoardVariantId = selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID;
+    renderBoardCards();
+    els.boardSelectContinueBtn.disabled = false; // always have a default
+    openModal(els.boardSelectModal);
+  };
+
+  CT.ui.hideBoardSelect = function () {
+    closeModal(els.boardSelectModal);
+  };
+
+  CT.ui.getSelectedBoardVariantId = function () {
+    return selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID;
+  };
+
+  function renderBoardCards() {
+    if (!els.boardCardGrid) return;
+    els.boardCardGrid.innerHTML = "";
+    var currentId = selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID;
+
+    CT.BOARD_VARIANTS.forEach(function (variant) {
+      var card = document.createElement("div");
+      card.className = "board-card";
+      if (variant.id === currentId) card.classList.add("is-selected");
+      card.dataset.variantId = variant.id;
+
+      // Mini board preview
+      card.appendChild(buildMiniPreview(variant.layout));
+
+      // Name
+      var nameEl = document.createElement("div");
+      nameEl.className = "board-card-name";
+      nameEl.textContent = variant.name;
+      card.appendChild(nameEl);
+
+      // Description
+      var descEl = document.createElement("div");
+      descEl.className = "board-card-desc";
+      descEl.textContent = variant.shortDescription;
+      card.appendChild(descEl);
+
+      card.addEventListener("click", function () {
+        selectedBoardVariantId = variant.id;
+        var cards = els.boardCardGrid.querySelectorAll(".board-card");
+        cards.forEach(function (c) { c.classList.remove("is-selected"); });
+        card.classList.add("is-selected");
+        els.boardSelectContinueBtn.disabled = false;
+      });
+
+      els.boardCardGrid.appendChild(card);
+    });
+  }
+
+  function buildMiniPreview(layout) {
+    var wrap = document.createElement("div");
+    wrap.className = "board-mini-preview";
+
+    var cellClassMap = {
+      "TC": "board-mini-tc",
+      "DC": "board-mini-dc",
+      "TN": "board-mini-tn",
+      "DN": "board-mini-dn",
+      "CS": "board-mini-cs"
+    };
+
+    for (var r = 0; r < 15; r++) {
+      for (var c = 0; c < 15; c++) {
+        var cell = document.createElement("div");
+        cell.className = "board-mini-cell";
+        var val = layout[r][c];
+        if (cellClassMap[val]) {
+          cell.classList.add(cellClassMap[val]);
+        } else if (r === 7 && c === 7) {
+          cell.classList.add("board-mini-center");
+        } else {
+          cell.classList.add("board-mini-normal");
+        }
+        wrap.appendChild(cell);
+      }
+    }
+
+    return wrap;
+  }
 
   CT.ui.showGame = function () {
     els.gameContainer.hidden = false;
@@ -842,7 +944,9 @@
       autoPlayTileOnTap: els.enableEarTraining.checked,
       autoPlayChordOnConfirm: els.enableEarTraining.checked,
       playbackMode: els.playbackMode.value,
-      enableTileSwap: els.enableTileSwap.checked
+      enableTileSwap: els.enableTileSwap.checked,
+      selectedBoardVariantId: selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID,
+      enableBlockedSpaces: els.enableBlockedSpaces ? els.enableBlockedSpaces.checked : true
     };
   };
 
