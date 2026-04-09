@@ -871,9 +871,16 @@ input[type="number"], input[type="text"], select {
 /* ── Responsive ───────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  body {
+    overflow-y: auto;
+  }
+
   .game-container {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto auto auto;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .sidebar {
@@ -886,6 +893,10 @@ input[type="number"], input[type="text"], select {
     border-bottom: 1px solid rgba(221, 184, 92, 0.12);
     overflow-y: visible;
     max-height: none;
+  }
+
+  .board-area {
+    overflow: visible;
   }
 
   .sidebar-header { width: auto; }
