@@ -29,19 +29,21 @@
   var nextTileId = 1;
 
   function makeTile(note) {
-    var isWild = note === "WILD";
+    var isWild  = note === "WILD";
+    var isClaim = note === "CLAIM";
     return {
-      id: nextTileId++,
-      note: note,
-      points: isWild ? 0 : (CT.TILE_POINTS[note] || 0),
-      isWild: isWild,
+      id:           nextTileId++,
+      note:         note,
+      points:       (isWild || isClaim) ? 0 : (CT.TILE_POINTS[note] || 0),
+      isWild:       isWild,
+      isClaim:      isClaim,
       assignedNote: null
     };
   }
 
   /* ── Bag ─────────────────────────────────────────────────────────────── */
 
-  function buildBag(includeAccidentals) {
+  function buildBag(includeAccidentals, enableClaimTiles) {
     var dist = includeAccidentals
       ? CT.TILE_DISTRIBUTION_CHROMATIC
       : CT.TILE_DISTRIBUTION_NATURAL;
@@ -51,7 +53,47 @@
         bag.push(makeTile(note));
       }
     }
+    // Add claim tiles when enabled
+    if (enableClaimTiles) {
+      var claimCount = includeAccidentals
+        ? CT.CLAIM_TILE_COUNT_CHROMATIC
+        : CT.CLAIM_TILE_COUNT_NATURAL;
+      for (var ci = 0; ci < claimCount; ci++) {
+        bag.push(makeTile("CLAIM"));
+      }
+    }
     return shuffle(bag);
+  }
+
+  /**
+   * Draw tiles for a specific player's rack, skipping claim tiles if the
+   * player already holds 2 or more (rack limit = 2 claim tiles at a time).
+   * Skipped claim tiles are shuffled back into the bag so they stay in play.
+   */
+  function drawTilesForPlayer(bag, count, currentRack) {
+    var claimCount = currentRack.filter(function (t) { return t.isClaim; }).length;
+    var drawn = [];
+    var skippedClaims = [];
+
+    while (drawn.length < count && bag.length > 0) {
+      var tile = bag.pop();
+      if (tile.isClaim && claimCount >= 2) {
+        skippedClaims.push(tile);   // hold aside, put back after
+      } else {
+        if (tile.isClaim) claimCount++; // track how many the player now holds
+        drawn.push(tile);
+      }
+    }
+
+    // Return skipped claim tiles to bag and re-shuffle to avoid order bias
+    if (skippedClaims.length > 0) {
+      for (var i = 0; i < skippedClaims.length; i++) {
+        bag.push(skippedClaims[i]);
+      }
+      shuffle(bag);
+    }
+
+    return drawn;
   }
 
   function shuffle(arr) {
@@ -92,7 +134,11 @@
           premiumType: premiumType,
           tile: null,
           isBlocked: false,
-          isLocked: false
+          isLocked: false,
+          // Claim tile fields (populated by CT.placeClaimTileOnBoard)
+          claimedByPlayerIndex: -1,   // -1 = unclaimed
+          claimExpiresAtTurn:   0,    // absolute turn count when claim expires
+          claimTileRef:         null  // tile object, returned to bag on expire/use
         };
       }
     }
@@ -135,7 +181,7 @@
     var blockedLayoutIndex = enableBlocked
       ? Math.floor(Math.random() * CT.BLOCKED_LAYOUTS.length)
       : -1;
-    var bag = buildBag(s.includeAccidentals);
+    var bag = buildBag(s.includeAccidentals, s.enableClaimTiles);
     var board = generateBoard(s, blockedLayoutIndex);
 
     var players = [];
@@ -155,6 +201,7 @@
       turnState: createFreshTurnState(),
       consecutivePassCount: 0,
       moveCount: 0,
+      totalTurns: 0,        // increments every time any player ends their turn
       finalRound: false,
       finalRoundStartPlayer: -1
     };
@@ -165,7 +212,8 @@
 
   function createFreshTurnState() {
     return {
-      placedTiles: [],   // { row, col, tile }
+      placedTiles: [],        // { row, col, tile } — normal note tiles
+      placedClaimTile: null,  // { row, col, tile } — max one claim tile per turn
       previewGroups: [],
       previewScore: 0,
       previewErrors: [],
@@ -188,6 +236,12 @@
     if (!st) return false;
     var cell = st.board[row][col];
     if (cell.isBlocked || cell.tile) return false;
+
+    // Opponent-claimed cells are unavailable
+    if (cell.claimedByPlayerIndex >= 0 &&
+        cell.claimedByPlayerIndex !== st.currentPlayerIndex) {
+      return false;
+    }
 
     cell.tile = tile;
     // Remove tile from player rack
@@ -233,10 +287,17 @@
   CT.recallAllTiles = function () {
     var st = CT.state;
     if (!st) return;
-    // Remove in reverse order
+    // Remove note tiles in reverse order
     var placed = st.turnState.placedTiles.slice();
     for (var i = placed.length - 1; i >= 0; i--) {
       CT.removeTileFromBoard(placed[i].row, placed[i].col);
+    }
+    // Also recall claim tile placed this turn (if any)
+    if (st.turnState.placedClaimTile) {
+      CT.removeClaimTileFromBoard(
+        st.turnState.placedClaimTile.row,
+        st.turnState.placedClaimTile.col
+      );
     }
   };
 
@@ -244,6 +305,94 @@
     return CT.state ? CT.state.turnState.placedTiles.map(function (p) {
       return { row: p.row, col: p.col };
     }) : [];
+  };
+
+  /* ── Claim tile placement ───────────────────────────────────────────── */
+
+  /**
+   * Place a claim tile on the board for the current player.
+   * Supports steal: if the target cell has an opponent's active claim, that
+   * claim tile is immediately returned to the bag and the new claim takes over
+   * with a fresh expiry timer.
+   * Claim is recorded immediately; expiry timer is set based on
+   * state.totalTurns so it survives numberOfPlayers × 3 full turns.
+   * Returns true on success, false if placement is illegal.
+   */
+  CT.placeClaimTileOnBoard = function (row, col, claimTile) {
+    var st = CT.state;
+    if (!st || !st.settings.enableClaimTiles) return false;
+    // Only one claim tile per turn
+    if (st.turnState.placedClaimTile) return false;
+
+    var cell = st.board[row][col];
+    // Cannot place on a blocked cell or one that already has a note tile
+    if (cell.isBlocked || cell.tile) return false;
+    // Cannot self-steal (refreshing own timer)
+    if (cell.claimedByPlayerIndex === st.currentPlayerIndex) return false;
+
+    // ── Steal: existing opponent claim → return their tile to the bag ─────
+    if (cell.claimedByPlayerIndex >= 0) {
+      if (cell.claimTileRef) {
+        st.bag.push(cell.claimTileRef);
+        shuffle(st.bag);
+      }
+      // Clear opponent's claim (overwritten below)
+      cell.claimedByPlayerIndex = -1;
+      cell.claimExpiresAtTurn   = 0;
+      cell.claimTileRef         = null;
+    }
+
+    // Mark the cell as claimed by the current player
+    cell.claimedByPlayerIndex = st.currentPlayerIndex;
+    // Fresh expiry: numberOfPlayers × 3 full turns from now
+    cell.claimExpiresAtTurn   = st.totalTurns + st.settings.numberOfPlayers * 3;
+    cell.claimTileRef         = claimTile;
+
+    // Remove from player rack
+    var player = st.players[st.currentPlayerIndex];
+    var idx = player.rack.indexOf(claimTile);
+    if (idx >= 0) player.rack.splice(idx, 1);
+
+    // Track in turn state
+    st.turnState.placedClaimTile = { row: row, col: col, tile: claimTile };
+
+    CT.emit("tile-placed", { row: row, col: col, tile: claimTile, isClaim: true });
+    return true;
+  };
+
+  /**
+   * Recall a claim tile placed THIS turn (before confirming).
+   * Clears claim data from the cell and returns the tile to the rack.
+   */
+  CT.removeClaimTileFromBoard = function (row, col) {
+    var st = CT.state;
+    if (!st) return false;
+
+    var ptc = st.turnState.placedClaimTile;
+    if (!ptc || ptc.row !== row || ptc.col !== col) return false;
+
+    var cell = st.board[row][col];
+    var claimTile = cell.claimTileRef;
+
+    // Clear claim from cell
+    cell.claimedByPlayerIndex = -1;
+    cell.claimExpiresAtTurn   = 0;
+    cell.claimTileRef         = null;
+
+    // Return tile to rack
+    var player = st.players[st.currentPlayerIndex];
+    player.rack.push(claimTile);
+
+    // Clear from turn state
+    st.turnState.placedClaimTile = null;
+
+    CT.emit("tile-removed", { row: row, col: col, tile: claimTile, isClaim: true });
+    return true;
+  };
+
+  /** Returns the claim tile placed this turn, or null. */
+  CT.getPlacedClaimTile = function () {
+    return CT.state ? CT.state.turnState.placedClaimTile : null;
   };
 
   /* ── Confirm placement ──────────────────────────────────────────────── */
@@ -254,18 +403,28 @@
 
     var player = st.players[st.currentPlayerIndex];
 
-    // Lock all placed tiles
+    // Lock all placed note tiles; consume own claims on covered cells
     st.turnState.placedTiles.forEach(function (p) {
-      st.board[p.row][p.col].isLocked = true;
+      var lockCell = st.board[p.row][p.col];
+      lockCell.isLocked = true;
+      // If the owner placed a note on their own claimed cell, consume the claim now
+      if (lockCell.claimedByPlayerIndex === st.currentPlayerIndex) {
+        if (lockCell.claimTileRef) {
+          st.bag.push(lockCell.claimTileRef); // return claim tile to bag
+        }
+        lockCell.claimedByPlayerIndex = -1;
+        lockCell.claimExpiresAtTurn   = 0;
+        lockCell.claimTileRef         = null;
+      }
     });
 
-    // Apply score
-    player.score += scoreResult.totalScore;
+    // Apply score (0 for claim-only turns)
+    player.score += scoreResult ? scoreResult.totalScore : 0;
 
-    // Refill rack
+    // Refill rack, respecting the 1-claim-tile-per-rack rule
     var needed = CT.RACK_SIZE - player.rack.length;
     if (needed > 0 && st.bag.length > 0) {
-      var drawn = drawTiles(st.bag, needed);
+      var drawn = drawTilesForPlayer(st.bag, needed, player.rack);
       player.rack = player.rack.concat(drawn);
     }
 
@@ -311,8 +470,8 @@
     });
     shuffle(st.bag);
 
-    // Draw same number
-    var drawn = drawTiles(st.bag, toSwap.length);
+    // Draw same number, respecting 1-claim-tile-per-rack rule
+    var drawn = drawTilesForPlayer(st.bag, toSwap.length, remaining);
     player.rack = remaining.concat(drawn);
     player.consecutiveScoringTurns = 0;
     player.passedLastTurn = false;
@@ -333,6 +492,25 @@
     // Check if we completed a round
     if (st.currentPlayerIndex === 0) {
       st.roundNumber++;
+    }
+
+    // Advance absolute turn counter (counts every player turn regardless of type)
+    st.totalTurns++;
+
+    // Expire claim tiles whose 3-round timer has elapsed
+    if (st.settings.enableClaimTiles) {
+      for (var er = 0; er < 15; er++) {
+        for (var ec = 0; ec < 15; ec++) {
+          var ecell = st.board[er][ec];
+          if (ecell.claimedByPlayerIndex >= 0 &&
+              st.totalTurns >= ecell.claimExpiresAtTurn) {
+            if (ecell.claimTileRef) st.bag.push(ecell.claimTileRef);
+            ecell.claimedByPlayerIndex = -1;
+            ecell.claimExpiresAtTurn   = 0;
+            ecell.claimTileRef         = null;
+          }
+        }
+      }
     }
 
     st.turnState = createFreshTurnState();
@@ -409,6 +587,25 @@
     if (!tile) return null;
     if (tile.isWild) return tile.assignedNote;
     return tile.note;
+  };
+
+  /* ── Claim rounds-left helper ───────────────────────────────────────── */
+
+  /**
+   * Returns the number of full rounds remaining before a claim expires.
+   * Uses the current state.totalTurns and the number of players to convert
+   * the internal absolute-turn counter into a human-readable round count.
+   * Never returns a negative value.
+   *
+   * @param {Object} cell - board cell with claimExpiresAtTurn set
+   * @returns {number} rounds left (0 = expires this round or already gone)
+   */
+  CT.getClaimRoundsLeft = function (cell) {
+    var st = CT.state;
+    if (!st || cell.claimedByPlayerIndex < 0) return 0;
+    var turnsLeft = cell.claimExpiresAtTurn - st.totalTurns;
+    if (turnsLeft <= 0) return 0;
+    return Math.ceil(turnsLeft / st.settings.numberOfPlayers);
   };
 
   /* ── Utility exports ────────────────────────────────────────────────── */
