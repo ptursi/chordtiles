@@ -201,6 +201,217 @@
     return result;
   }
 
+  /* ── Inversion classification ──────────────────────────────────────── */
+
+  /**
+   * Functional interval sequences for eligible chord types (mod 12).
+   * Array index = chord function: 0=root, 1=3rd, 2=5th, 3=7th, 4=9th.
+   * Chord types NOT listed here (augmented, fully diminished 7th, sus4)
+   * are excluded from inversion bonus — they are either symmetrical or
+   * cannot be classified cleanly by this scheme.
+   */
+  var INVERSION_SEQUENCES = {
+    "major triad":         [0, 4, 7],   // root / 3rd / 5th
+    "minor triad":         [0, 3, 7],   // root / 3rd / 5th
+    "diminished triad":    [0, 3, 6],   // root / 3rd / 5th
+    "sus4 triad":          [0, 5, 7],   // root / 4th / 5th  (replaces 3rd with 4th)
+    "major 7th":           [0, 4, 7, 11],
+    "minor 7th":           [0, 3, 7, 10],
+    "dominant 7th":        [0, 4, 7, 10],
+    "half diminished 7th": [0, 3, 6, 10],
+    "minor major 7th":     [0, 3, 7, 11],
+    "major 9":             [0, 4, 7, 11, 2],
+    "minor 9":             [0, 3, 7, 10, 2],
+    "dominant 9":          [0, 4, 7, 10, 2],
+    "dominant b9":         [0, 4, 7, 10, 1],
+    "dominant #9":         [0, 4, 7, 10, 3]
+    // augmented triad     → excluded (symmetrical, 3 equal-interval slices)
+    // fully diminished 7th→ excluded (symmetrical, 4 equal-interval slices)
+  };
+
+  /**
+   * CT.getInversionClassification
+   *
+   * Classifies the inversion of a chord from its main-line board cells.
+   * Reading order is left→right (horizontal) or top→bottom (vertical) —
+   * cells[] must already be in that order (extractLine guarantees this).
+   *
+   * Algorithm:
+   *  1. Build interval→function-index map from the chord's INVERSION_SEQUENCE.
+   *  2. Walk cells in order; map each note's interval-from-root to a function
+   *     index (root=0, 3rd=1, 5th=2, 7th=3, 9th=4). Skip duplicate function
+   *     indices (keeps first occurrence).
+   *  3. First function index seen → inversion type:
+   *       0 = root position (check remaining for perfect vs imperfect)
+   *       1 = 1st inversion
+   *       2 = 2nd inversion
+   *       other = none
+   *  4. Perfect root position: root is first AND remaining indices are
+   *     strictly ascending (1,2,3,4,...). Any other order = imperfect.
+   *
+   * @param {Array}  cells       Main group cells in board reading order.
+   * @param {Object} chordResult { chordType, root (rootName string), ... }
+   * @returns {{ label: string, bonusPct: number }}
+   */
+  CT.getInversionClassification = function (cells, chordResult) {
+    var seq = INVERSION_SEQUENCES[chordResult.chordType];
+    if (!seq) return { label: "none", bonusPct: 0 };
+
+    var rootPC = CT.NOTE_TO_PITCH_CLASS[chordResult.root];
+    if (rootPC === undefined) return { label: "none", bonusPct: 0 };
+
+    // Build reverse map: interval mod 12 → function index
+    var intervalToFuncIdx = {};
+    for (var k = 0; k < seq.length; k++) {
+      intervalToFuncIdx[seq[k]] = k;
+    }
+
+    // Walk cells in reading order; collect function indices (no duplicates)
+    var funcSeq = [];
+    var seenFuncIdx = {};
+    for (var i = 0; i < cells.length; i++) {
+      if (!cells[i].tile) continue;
+      var note = CT.getEffectiveNote(cells[i].tile);
+      if (!note) continue;
+      var pc = CT.NOTE_TO_PITCH_CLASS[note];
+      if (pc === undefined) continue;
+      var interval = (pc - rootPC + 12) % 12;
+      var fi = intervalToFuncIdx[interval];
+      if (fi === undefined) continue;
+      if (!seenFuncIdx[fi]) {
+        seenFuncIdx[fi] = true;
+        funcSeq.push(fi);
+      }
+    }
+
+    if (funcSeq.length < 2) return { label: "none", bonusPct: 0 };
+
+    var first = funcSeq[0];
+
+    if (first === 1) return { label: "1st Inversion", bonusPct: 15 };
+    if (first === 2) return { label: "2nd Inversion", bonusPct: 10 };
+
+    if (first === 0) {
+      // Root is first — check if remaining are in strictly ascending order
+      var ascending = true;
+      for (var j = 1; j < funcSeq.length - 1; j++) {
+        if (funcSeq[j] >= funcSeq[j + 1]) { ascending = false; break; }
+      }
+      return ascending
+        ? { label: "Root Position (Perfect)", bonusPct: 40 }
+        : { label: "Root Position (Imperfect)", bonusPct: 25 };
+    }
+
+    // First tone is not root, 3rd, or 5th
+    return { label: "none", bonusPct: 0 };
+  };
+
+  /**
+   * CT.runInversionTests — 12 self-test cases for CT.getInversionClassification.
+   * Call from browser console to verify correctness.
+   */
+  CT.runInversionTests = function () {
+    var pass = 0, fail = 0;
+
+    function check(desc, actual, expected) {
+      if (actual === expected) {
+        pass++;
+      } else {
+        console.error("FAIL [inversion]: " + desc + " — expected " + JSON.stringify(expected) + ", got " + JSON.stringify(actual));
+        fail++;
+      }
+    }
+
+    function makeCells(notes) {
+      return notes.map(function (n) {
+        return { tile: { note: n, isWild: false }, isLocked: true };
+      });
+    }
+
+    function classify(notes, chordType, rootName) {
+      return CT.getInversionClassification(makeCells(notes), { chordType: chordType, root: rootName });
+    }
+
+    // 1. Perfect root triad (horizontal): C-E-G
+    var r = classify(["C","E","G"], "major triad", "C");
+    check("C-E-G perfect root label", r.label, "Root Position (Perfect)");
+    check("C-E-G perfect root pct",   r.bonusPct, 40);
+
+    // 2. Imperfect root triad: C-G-E
+    r = classify(["C","G","E"], "major triad", "C");
+    check("C-G-E imperfect root label", r.label, "Root Position (Imperfect)");
+    check("C-G-E imperfect root pct",   r.bonusPct, 25);
+
+    // 3. 1st inversion: E-G-C
+    r = classify(["E","G","C"], "major triad", "C");
+    check("E-G-C 1st inv label", r.label, "1st Inversion");
+    check("E-G-C 1st inv pct",   r.bonusPct, 15);
+
+    // 4. 2nd inversion: G-E-C (5th first)
+    r = classify(["G","E","C"], "major triad", "C");
+    check("G-E-C 2nd inv label", r.label, "2nd Inversion");
+    check("G-E-C 2nd inv pct",   r.bonusPct, 10);
+
+    // 5. Vertical perfect root 7th chord: A-C-E-G (minor 7th, root A)
+    r = classify(["A","C","E","G"], "minor 7th", "A");
+    check("A-C-E-G minor 7th perfect label", r.label, "Root Position (Perfect)");
+    check("A-C-E-G minor 7th perfect pct",   r.bonusPct, 40);
+
+    // 6. Augmented triad excluded
+    r = classify(["C","E","G#/Ab"], "augmented triad", "C");
+    check("augmented excluded label", r.label, "none");
+    check("augmented excluded pct",   r.bonusPct, 0);
+
+    // 7. Fully diminished 7th excluded
+    r = classify(["C","D#/Eb","F#/Gb","A"], "fully diminished 7th", "C");
+    check("fully dim 7th excluded label", r.label, "none");
+    check("fully dim 7th excluded pct",   r.bonusPct, 0);
+
+    // 8. sus4 — uses root/4th/5th scheme
+    r = classify(["C","F","G"], "sus4 triad", "C");
+    check("sus4 C-F-G perfect root label", r.label, "Root Position (Perfect)");
+    check("sus4 C-F-G perfect root pct",   r.bonusPct, 40);
+
+    r = classify(["C","G","F"], "sus4 triad", "C");
+    check("sus4 C-G-F imperfect root label", r.label, "Root Position (Imperfect)");
+    check("sus4 C-G-F imperfect root pct",   r.bonusPct, 25);
+
+    r = classify(["F","C","G"], "sus4 triad", "C");
+    check("sus4 F-C-G 1st inv label", r.label, "1st Inversion");
+    check("sus4 F-C-G 1st inv pct",   r.bonusPct, 15);
+
+    r = classify(["G","C","F"], "sus4 triad", "C");
+    check("sus4 G-C-F 2nd inv label", r.label, "2nd Inversion");
+    check("sus4 G-C-F 2nd inv pct",   r.bonusPct, 10);
+
+    r = classify(["F","F","C","G"], "sus4 triad", "C");
+    check("sus4 F-F-C-G 1st inv (dup) label", r.label, "1st Inversion");
+    check("sus4 F-F-C-G 1st inv (dup) pct",   r.bonusPct, 15);
+
+    // 9. Perfect root 9th chord: F-A-C-E-G (major 9, root F)
+    r = classify(["F","A","C","E","G"], "major 9", "F");
+    check("F major 9 perfect label", r.label, "Root Position (Perfect)");
+    check("F major 9 perfect pct",   r.bonusPct, 40);
+
+    // 10. Imperfect root 9th chord: F-C-E-G-A (major 9, root F — 5th before 3rd)
+    r = classify(["F","C","E","G","A"], "major 9", "F");
+    check("F major 9 imperfect label", r.label, "Root Position (Imperfect)");
+    check("F major 9 imperfect pct",   r.bonusPct, 25);
+
+    // 11. 1st inversion 7th: C-E-G-A (minor 7th root A, 3rd=C first)
+    r = classify(["C","E","G","A"], "minor 7th", "A");
+    check("minor 7th 1st inv C-E-G-A label", r.label, "1st Inversion");
+    check("minor 7th 1st inv C-E-G-A pct",   r.bonusPct, 15);
+
+    // 12. 2nd inversion triad: G-C-E (major triad root C, 5th=G first)
+    r = classify(["G","C","E"], "major triad", "C");
+    check("G-C-E 2nd inv label", r.label, "2nd Inversion");
+    check("G-C-E 2nd inv pct",   r.bonusPct, 10);
+
+    console.log("CT.runInversionTests: " + pass + " passed, " + fail + " failed.");
+    return { pass: pass, fail: fail };
+  };
+
   /* ── Group extraction from board ────────────────────────────────────── */
 
   /**
