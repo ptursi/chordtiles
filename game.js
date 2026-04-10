@@ -197,6 +197,9 @@
     // Clear group highlights
     CT.ui.highlightGroups(null, null);
 
+    // Refresh claim overlays for the new active player's perspective
+    CT.ui.updateAllClaimOverlays();
+
     // Show triads-blocked cells based on the current locked board state
     CT.ui.updateTriadsBlocking();
 
@@ -212,9 +215,10 @@
   /* ── Placement changed ──────────────────────────────────────────────── */
 
   function refreshAfterPlacementChange() {
-    var placed = CT.getPlacedTilePositions();
+    var placed      = CT.getPlacedTilePositions();
+    var claimPlaced = CT.getPlacedClaimTile();
 
-    if (placed.length === 0) {
+    if (placed.length === 0 && !claimPlaced) {
       CT.ui.updatePreview(null, null);
       // Update all cells (in case tiles were recalled)
       for (var r = 0; r < 15; r++) {
@@ -226,16 +230,19 @@
       return;
     }
 
-    var validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
+    var validation  = null;
     var scoreResult = null;
 
-    if (validation.valid) {
-      scoreResult = CT.calculateTurnScore(
-        validation.chordResults,
-        validation.groups,
-        CT.state.board,
-        placed
-      );
+    if (placed.length > 0) {
+      validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
+      if (validation.valid) {
+        scoreResult = CT.calculateTurnScore(
+          validation.chordResults,
+          validation.groups,
+          CT.state.board,
+          placed
+        );
+      }
     }
 
     CT.ui.updatePreview(validation, scoreResult);
@@ -245,26 +252,39 @@
   /* ── Confirm move ───────────────────────────────────────────────────── */
 
   function handleConfirmMove() {
-    var placed = CT.getPlacedTilePositions();
-    if (placed.length === 0) return;
+    var placed      = CT.getPlacedTilePositions();
+    var claimPlaced = CT.getPlacedClaimTile(); // snapshot BEFORE confirmPlacement
 
-    var validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
-    if (!validation.valid) return;
+    // Nothing to confirm
+    if (placed.length === 0 && !claimPlaced) return;
 
-    var scoreResult = CT.calculateTurnScore(
-      validation.chordResults,
-      validation.groups,
-      CT.state.board,
-      placed
-    );
+    var validation  = null;
+    var scoreResult = null;
+
+    // Validate note tile placement (if any note tiles are placed)
+    if (placed.length > 0) {
+      validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
+      if (!validation.valid) return;
+
+      scoreResult = CT.calculateTurnScore(
+        validation.chordResults,
+        validation.groups,
+        CT.state.board,
+        placed
+      );
+    }
+
+    // Claim placement was fully validated at placement time.
+    // Re-running validateClaimPlacement here would incorrectly reject it because
+    // claimedByPlayerIndex is already set on the cell. No second check needed.
 
     clearTimer();
 
-    // Confirm placement (locks tiles, awards score, refills rack)
+    // Confirm placement (locks note tiles, applies score, refills rack)
     CT.confirmPlacement(scoreResult);
 
-    // Always build chord data for replay button
-    if (scoreResult.chords.length > 0) {
+    // Build chord replay data and play back
+    if (scoreResult && scoreResult.chords.length > 0) {
       var allChordData = [];
       for (var ci = 0; ci < validation.chordResults.length; ci++) {
         var notes = getNotesFromGroup(validation.chordResults[ci]);
@@ -272,7 +292,6 @@
       }
       lastAllChordData = allChordData;
 
-      // Auto-play chords on confirm if ear training is on
       if (CT.state.settings.enableEarTraining && CT.state.settings.autoPlayChordOnConfirm) {
         playAllChords(allChordData, CT.state.settings.playbackMode);
       } else {
@@ -285,8 +304,8 @@
 
     lastScoreResult = scoreResult;
 
-    // Build turn summary
-    var summary = buildTurnSummary(scoreResult);
+    // Build turn summary (claimPlaced still accessible — turnState cleared in advanceTurn later)
+    var summary = buildTurnSummary(scoreResult, claimPlaced);
 
     finishTurn(scoreResult, summary);
   }
@@ -370,7 +389,7 @@
     CT.ui.renderScoreboard();
   }
 
-  function buildTurnSummary(scoreResult) {
+  function buildTurnSummary(scoreResult, claimPlaced) {
     var player = CT.state.players[CT.state.currentPlayerIndex];
     var html = "";
 
@@ -396,6 +415,18 @@
         html += '<span class="summary-line summary-total">= <strong>' + c.groupScore + ' points</strong></span>';
         html += '</div>';
       });
+    } else if (claimPlaced) {
+      // Claim-only turn
+      html += '<p class="summary-header"><strong>' + esc(player.name) + '</strong> claimed a space (0 points).</p>';
+    }
+
+    // Show claim tile action if it was placed this turn
+    if (claimPlaced) {
+      var playerColor = CT.PLAYER_COLORS[CT.state.currentPlayerIndex] || "#888";
+      html += '<div class="summary-chord-block summary-claim-block">';
+      html += '<span class="summary-chord-name" style="color:' + playerColor + '">★ Space Claimed</span>';
+      html += '<span class="summary-line">Row ' + (claimPlaced.row + 1) + ', Column ' + (claimPlaced.col + 1) + ' reserved for 3 rounds.</span>';
+      html += '</div>';
     }
 
     return html;
