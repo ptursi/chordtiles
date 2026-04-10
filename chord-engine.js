@@ -627,11 +627,13 @@
       var pitchClasses = groupToPitchClasses(group.cells);
 
       if (group.cells.length < 3) {
-        if (group.isMainLine) {
-          // A 2-note main line is not a valid chord — players must form at least a triad.
+        if (group.isMainLine && placedPositions.length > 1) {
+          // Multi-tile placement with only a 2-note main line — no chord was formed.
           errors.push("The main line must form at least 3 notes.");
         }
-        // Cross-groups of 2 notes are allowed (they don't score or invalidate the move).
+        // Single-tile placements that incidentally touch one existing tile are not
+        // penalised here; the "at least one new chord" check handles the case where
+        // no axis produces a valid chord. Cross-groups of 2 are always silent.
         continue;
       }
 
@@ -1023,8 +1025,12 @@
       var hRes = hEval ? evalAxisLegal(newPC, hInfo) : "ok";
       var vRes = vEval ? evalAxisLegal(newPC, vInfo) : "ok";
 
-      // A note fails if any evaluable axis rejects it.
-      if (hRes === "invalid" || vRes === "invalid") continue;
+      // A note fails if any evaluable axis rejects or would leave an unchanged chord.
+      // "unchanged" is treated identically to "invalid" here because the validator
+      // now makes unchanged chords a hard error — matching that behaviour prevents
+      // the blocker from showing cells as open that the validator would reject.
+      if (hRes === "invalid" || hRes === "unchanged" ||
+          vRes === "invalid" || vRes === "unchanged") continue;
 
       // Both evaluable axes are structurally valid.  At least one must
       // produce a genuinely NEW chord identity (mirrors the validator's
