@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chord Tiles</title>
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=12" />
 </head>
 <body>
 
@@ -162,6 +162,11 @@
               <span>Triads Only mode</span>
             </label>
             <p class="setting-help">Only allow 3-note combinations. Extensions to 7ths and 9ths are disabled.</p>
+            <label class="toggle-row">
+              <input type="checkbox" id="enableInversionBonus" />
+              <span>Enable Inversion Bonus</span>
+            </label>
+            <p class="setting-help">Awards a bonus to the main line based on chord inversion. Root position earns the most; 1st and 2nd inversions earn less. Stacks freely with DC/TC multipliers. Not available for augmented or fully diminished 7th chords.</p>
           </section>
         </div>
 
@@ -326,12 +331,12 @@
     </div>
   </div>
 
-  <script src="data.js?v=8"></script>
-  <script src="state.js?v=8"></script>
-  <script src="chord-engine.js?v=8"></script>
-  <script src="scoring.js?v=8"></script>
-  <script src="audio.js?v=8"></script>
-  <script src="ui.js?v=8"></script>
-  <script src="game.js?v=8"></script>
+  <script src="data.js?v=12"></script>
+  <script src="state.js?v=12"></script>
+  <script src="chord-engine.js?v=12"></script>
+  <script src="scoring.js?v=12"></script>
+  <script src="audio.js?v=12"></script>
+  <script src="ui.js?v=12"></script>
+  <script src="game.js?v=12"></script>
 </body>
 </html>
