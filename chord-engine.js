@@ -627,7 +627,11 @@
       var pitchClasses = groupToPitchClasses(group.cells);
 
       if (group.cells.length < 3) {
-        // 2-note groups are ignored (neither score nor invalidate)
+        if (group.isMainLine) {
+          // A 2-note main line is not a valid chord — players must form at least a triad.
+          errors.push("The main line must form at least 3 notes.");
+        }
+        // Cross-groups of 2 notes are allowed (they don't score or invalidate the move).
         continue;
       }
 
@@ -679,8 +683,7 @@
         if (!detection) {
           errors.push("Main line does not form a valid chord.");
         } else if (isUnchangedChord) {
-          // Valid chord but unchanged — doesn't score, doesn't invalidate
-          // Do not push to chordResults (no score), but don't push error either
+          errors.push("Main line already forms this chord — the extension must create a new chord identity.");
         } else {
           mainLineValid = true;
           chordResults.push({
@@ -692,11 +695,13 @@
           });
         }
       } else {
-        // Cross group of 3+: must be valid chord (even if unchanged)
+        // Cross group of 3+: must be valid chord AND must create a new chord identity
         if (!detection) {
           errors.push("A cross-group does not form a valid chord: " +
             group.cells.map(function (c) { return CT.getEffectiveNote(c.tile); }).join("-"));
-        } else if (!isUnchangedChord) {
+        } else if (isUnchangedChord) {
+          errors.push("A cross-group already forms this chord — the extension must create a new chord identity.");
+        } else {
           chordResults.push({
             group: group,
             chordType: detection.chordType,
@@ -705,7 +710,6 @@
             pitchClasses: pitchClasses
           });
         }
-        // If isUnchangedChord: valid but unchanged — skip scoring silently
       }
     }
 
@@ -783,10 +787,263 @@
     return pcs;
   }
 
+  /* ── Claim tile placement validation ───────────────────────────────── */
+
+  /**
+   * Validate whether a claim tile may be placed at (row, col).
+   * Rules:
+   *  - Cannot be placed on the first move (no locked tiles exist yet)
+   *  - Cannot be on blocked, DC, or TC cells
+   *  - Cannot be on occupied cells (note tile already there)
+   *  - Cannot self-steal (refreshing your own claim timer is not allowed)
+   *  - May steal an OPPONENT's active claim — the old tile returns to bag in state
+   *  - Must be adjacent to at least one locked tile OR a tile placed this turn
+   *
+   * @param {number}   row
+   * @param {number}   col
+   * @param {Array}    board             - 15×15 cell array
+   * @param {boolean}  isFirstMove
+   * @param {Array}    [placedPositions] - array of {row,col} for tiles placed this turn
+   * @param {number}   [currentPlayerIndex] - index of the acting player
+   * Returns { valid: boolean, isSteal: boolean, error: string|null }
+   */
+  CT.validateClaimPlacement = function (row, col, board, isFirstMove, placedPositions, currentPlayerIndex) {
+    if (isFirstMove) {
+      return { valid: false, isSteal: false, error: "Claim tiles cannot be placed on the first move." };
+    }
+    var cell = board[row][col];
+    if (cell.isBlocked) {
+      return { valid: false, isSteal: false, error: "Cannot claim blocked spaces." };
+    }
+    if (cell.tile) {
+      return { valid: false, isSteal: false, error: "Cannot claim an occupied space." };
+    }
+    if (cell.premiumType === "DC" || cell.premiumType === "TC") {
+      return { valid: false, isSteal: false, error: "Claim tiles cannot be placed on DC or TC spaces." };
+    }
+
+    var isSteal = false;
+    if (cell.claimedByPlayerIndex >= 0) {
+      // Self-steal is not allowed (cannot refresh own claim timer)
+      if (currentPlayerIndex !== undefined && cell.claimedByPlayerIndex === currentPlayerIndex) {
+        return { valid: false, isSteal: false, error: "You cannot steal your own reserved space." };
+      }
+      // Opponent claim — this is a steal, which is legal if adjacency is met
+      isSteal = true;
+    }
+
+    // Build a fast lookup of positions placed this turn
+    var placedSet = {};
+    if (placedPositions && placedPositions.length) {
+      for (var p = 0; p < placedPositions.length; p++) {
+        placedSet[placedPositions[p].row + "," + placedPositions[p].col] = true;
+      }
+    }
+
+    // Must be adjacent to a locked tile OR a tile placed this turn
+    var dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    var adjacent = false;
+    for (var d = 0; d < dirs.length; d++) {
+      var nr = row + dirs[d][0];
+      var nc = col + dirs[d][1];
+      if (nr >= 0 && nr < 15 && nc >= 0 && nc < 15) {
+        var ncell = board[nr][nc];
+        if ((ncell.tile && ncell.isLocked) || placedSet[nr + "," + nc]) {
+          adjacent = true;
+          break;
+        }
+      }
+    }
+    if (!adjacent) {
+      return { valid: false, isSteal: false, error: "Claim tile must be adjacent to a tile already on the board or placed this turn." };
+    }
+
+    return { valid: true, isSteal: isSteal, error: null };
+  };
+
+  /* ── Cell auto-blocking — single source of truth ──────────────────── */
+
+  /**
+   * Collect contiguous-tile info along one axis from an empty cell (r, c).
+   *
+   * Walks outward from (r,c) in both directions along `axis` ("h" or "v"),
+   * stopping at the first empty or out-of-bounds cell on each side.
+   *
+   * Returns:
+   *   count      — total number of tiles found (both sides combined)
+   *   pcs        — deduplicated pitch-class array from ALL those tiles
+   *   pcSet      — { [pc]: true } lookup for fast duplicate checks against ALL tiles
+   *   lockedPcs  — deduplicated pitch-class array from LOCKED tiles only
+   *
+   * lockedPcs mirrors what validatePlacement calls "existingCells" — the tiles
+   * that were already on the board before the current turn started.  This is
+   * the set used by the validator's isUnchangedChord check (lines 662-675) to
+   * determine whether a placement creates a genuinely new chord identity.
+   */
+  function cellAxisInfo(r, c, axis) {
+    var board = CT.state.board;
+    var neighbors = [];
+    if (axis === "h") {
+      for (var cc = c - 1; cc >= 0;  cc--)  { if (board[r][cc].tile) neighbors.unshift(board[r][cc]); else break; }
+      for (var cc2 = c + 1; cc2 < 15; cc2++) { if (board[r][cc2].tile) neighbors.push(board[r][cc2]); else break; }
+    } else {
+      for (var rr = r - 1; rr >= 0;  rr--)  { if (board[rr][c].tile) neighbors.unshift(board[rr][c]); else break; }
+      for (var rr2 = r + 1; rr2 < 15; rr2++) { if (board[rr2][c].tile) neighbors.push(board[rr2][c]); else break; }
+    }
+    var pcs = [], pcSet = {}, lockedPcs = [], lockedPcSet = {}, hasUnlockedTile = false;
+    for (var i = 0; i < neighbors.length; i++) {
+      if (!neighbors[i].isLocked) hasUnlockedTile = true;
+      var note = CT.getEffectiveNote(neighbors[i].tile);
+      if (note) {
+        var pc = CT.NOTE_TO_PITCH_CLASS[note];
+        if (pc !== undefined && pc >= 0) {
+          if (!pcSet[pc])       { pcs.push(pc);       pcSet[pc]       = true; }
+          if (neighbors[i].isLocked && !lockedPcSet[pc]) {
+            lockedPcs.push(pc); lockedPcSet[pc] = true;
+          }
+        }
+      }
+    }
+    return { count: neighbors.length, pcs: pcs, pcSet: pcSet, lockedPcs: lockedPcs, hasUnlockedTile: hasUnlockedTile };
+  }
+
+  /**
+   * Evaluate placing pitch-class `newPC` into an existing axis group.
+   *
+   * Mirrors validatePlacement's isUnchangedChord check exactly:
+   *   • "before" chord = detectExactChord(axisInfo.lockedPcs)
+   *                      (only tiles locked from previous turns — same as validator's
+   *                       existingCells filtered by placedPosSet)
+   *   • "after" chord  = detectExactChord(fullPCs after adding newPC)
+   *   • "unchanged" only when both are non-null AND have the same type + root
+   *
+   * This eliminates the false-positive blocking that occurred when placed-this-turn
+   * tiles extended a group to 3+ tiles: the blocker previously used allPcs for the
+   * "before" comparison, but the validator only looks at locked tiles.  With this
+   * fix, both systems agree on what constitutes "same chord identity."
+   *
+   * Returns:
+   *   "new_chord"  — the note produces a valid chord that is a new identity
+   *   "unchanged"  — the note leaves the chord identity the same as the locked-only chord
+   *   "invalid"    — the resulting group cannot form any valid chord
+   */
+  function evalAxisLegal(newPC, axisInfo) {
+    // Compute the full PC set after placing newPC.
+    var fullPCs;
+    if (axisInfo.pcSet[newPC]) {
+      fullPCs = axisInfo.pcs;              // duplicate — unique set unchanged
+    } else {
+      fullPCs = axisInfo.pcs.concat([newPC]);
+      if (fullPCs.length > 5) return "invalid"; // detectExactChord always null for 6+
+    }
+
+    var afterChord = CT.detectExactChord(fullPCs);
+    if (!afterChord) return "invalid";
+
+    // Mirror the validator's isUnchangedChord: compare against the chord formed
+    // by LOCKED tiles only.  If the locked tiles didn't form a chord (null),
+    // any valid afterChord is by definition a new identity.
+    var beforeChord = CT.detectExactChord(axisInfo.lockedPcs);
+    if (beforeChord &&
+        beforeChord.chordType === afterChord.chordType &&
+        beforeChord.rootName  === afterChord.rootName) {
+      return "unchanged";
+    }
+
+    return "new_chord";
+  }
+
+  /**
+   * CT.isCellAutoBlocked(row, col, enabledNotes)
+   *
+   * The SINGLE SOURCE OF TRUTH for the auto-block preview system.
+   *
+   * Returns true only when NO enabled note tile can be legally placed at
+   * (row, col) under the current board state, using the exact same rules
+   * as validatePlacement — detectExactChord for chord detection, and the
+   * same locked-tiles-only "before chord" comparison for identity checks.
+   *
+   * ALIGNMENT WITH validatePlacement
+   * ──────────────────────────────────
+   * evalAxisLegal computes the "before chord" from axisInfo.lockedPcs (tiles
+   * locked from previous turns only), exactly matching what validatePlacement
+   * does via its existingCells/isUnchangedChord check.  A cell is only marked
+   * "unchanged" when the locked-only sub-group already formed the same chord.
+   * If placed-this-turn tiles contributed to the group but the locked tiles
+   * alone don't form a chord, any valid result is treated as a new identity —
+   * eliminating the false-positive blocking that occurred when in-progress
+   * this-turn lines were mistakenly treated as "closed" chord groups.
+   *
+   * AUTO-BLOCK TRIGGER POLICY
+   * ─────────────────────────
+   * An axis is "evaluable" (chord-constraining) only when placing at (row,col)
+   * would form a group of 4+ tiles along that axis — i.e. ≥3 existing
+   * neighbours are already there, AND at least one has a known pitch class.
+   *
+   * Why ≥3 neighbours (4+-tile result), not ≥2 (3-tile result)?
+   *   A 2-tile group is always "in progress".  The player may resolve it with
+   *   a multi-tile placement even if no single 3rd note alone completes a chord
+   *   (e.g. B+C need a 4-note chord like Cmaj7).  Blocking adjacent cells
+   *   would prevent those multi-tile moves entirely.  Only an established 3+-tile
+   *   chord line constrains what can legally extend it.
+   *
+   * A cell is blocked only when, for EVERY enabled note:
+   *   • it makes at least one evaluable axis invalid, OR
+   *   • no evaluable axis produces a genuinely new chord identity
+   *     ("unchanged" duplicates do not satisfy the new-chord requirement
+   *      that validatePlacement enforces at lines 719-722).
+   *
+   * @param {number}   row
+   * @param {number}   col
+   * @param {string[]} enabledNotes  Array of note name strings ("C","D#",…)
+   * @returns {boolean}
+   */
+  CT.isCellAutoBlocked = function (row, col, enabledNotes) {
+    if (!CT.state) return false;
+
+    var hInfo = cellAxisInfo(row, col, "h");
+    var vInfo = cellAxisInfo(row, col, "v");
+
+    // "Evaluable" axis = would produce a 4+-tile group with ≥1 known pitch class,
+    // AND every tile in that axis is locked (placed in a previous turn).
+    // If ANY tile in the axis belongs to the current in-progress turn, we suppress
+    // blocking for that axis — the player may be building a multi-tile chord and a
+    // single-note lookahead would produce misleading false negatives.
+    // The real-time preview (group highlight) gives accurate feedback in that case.
+    var hEval = hInfo.count >= 3 && hInfo.pcs.length > 0 && !hInfo.hasUnlockedTile;
+    var vEval = vInfo.count >= 3 && vInfo.pcs.length > 0 && !vInfo.hasUnlockedTile;
+
+    // No evaluable axis → cell is fully open.
+    if (!hEval && !vEval) return false;
+
+    for (var n = 0; n < enabledNotes.length; n++) {
+      var newPC = CT.NOTE_TO_PITCH_CLASS[enabledNotes[n]];
+      if (newPC === undefined || newPC < 0) continue;
+
+      var hRes = hEval ? evalAxisLegal(newPC, hInfo) : "ok";
+      var vRes = vEval ? evalAxisLegal(newPC, vInfo) : "ok";
+
+      // A note fails if any evaluable axis rejects it.
+      if (hRes === "invalid" || vRes === "invalid") continue;
+
+      // Both evaluable axes are structurally valid.  At least one must
+      // produce a genuinely NEW chord identity (mirrors the validator's
+      // "at least one new chord" requirement at lines 719-722).
+      var createsNewChord = (hEval && hRes === "new_chord") ||
+                            (vEval && vRes === "new_chord");
+      if (!createsNewChord) continue;
+
+      return false; // A legal, new-chord-producing note exists → not blocked.
+    }
+
+    return true; // Every note either invalidates a group or only repeats an existing chord.
+  };
+
   /* ── Exports ────────────────────────────────────────────────────────── */
 
-  CT.noteToPitchClass = noteToPitchClass;
-  CT.groupToPitchClasses = groupToPitchClasses;
+  CT.noteToPitchClass      = noteToPitchClass;
+  CT.groupToPitchClasses   = groupToPitchClasses;
+  CT.hasAdjacentLockedTile = hasAdjacentLockedTile;
 
   /* ── Developer self-checks (run CT.runChordEngineTests() in console) ── */
 
