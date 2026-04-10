@@ -655,6 +655,18 @@ input[type="number"], input[type="text"], select {
   opacity: 0.55;
   position: relative;
 }
+/* When the current player has a claim tile, opponent cells can be stolen — show hint */
+.cell-claim-opponent.cell-claim-stealable {
+  opacity: 0.78;
+  cursor: copy;
+  outline: 2px dashed rgba(255, 255, 255, 0.55);
+  outline-offset: -3px;
+}
+.cell-claim-opponent.cell-claim-stealable:hover {
+  opacity: 0.95;
+  outline-color: rgba(255, 255, 255, 0.9);
+}
+
 /* Allow drop-target highlight when a claim tile is dragged over opponent claim */
 .cell-claim-opponent.cell-drop-target {
   opacity: 0.85;
