@@ -377,12 +377,21 @@
     if (scoreResult) {
       html += '<p class="summary-header"><strong>' + esc(player.name) + '</strong> scored <strong>' + scoreResult.totalScore + ' points</strong>.</p>';
       scoreResult.chords.forEach(function (c) {
+        var invEnabled = CT.state && CT.state.settings.enableInversionBonus;
         html += '<div class="summary-chord-block">';
-        html += '<span class="summary-chord-name">' + esc(c.displayName) + '</span>';
+        html += '<span class="summary-chord-name">' + esc(c.displayName) + (c.isMainLine ? '' : ' <em class="summary-cross-label">(cross)</em>') + '</span>';
         html += '<span class="summary-line">Chord Points: <strong>+' + c.chordBonus + '</strong></span>';
         html += '<span class="summary-line">Tile Points: <strong>+' + c.tilePoints + '</strong></span>';
         if (c.premiumBonus > 0) {
           html += '<span class="summary-line">Premium Bonus: <strong>+' + c.premiumBonus + '</strong></span>';
+        }
+        if (invEnabled && c.isMainLine && c.inversionLabel !== null) {
+          if (c.inversionBonus > 0) {
+            html += '<span class="summary-line">Inversion: <strong>' + esc(c.inversionLabel) + '</strong></span>';
+            html += '<span class="summary-line">Inversion Bonus: <strong>+' + c.inversionBonus + '</strong></span>';
+          } else {
+            html += '<span class="summary-line">Inversion Bonus: <em>none</em></span>';
+          }
         }
         html += '<span class="summary-line summary-total">= <strong>' + c.groupScore + ' points</strong></span>';
         html += '</div>';
