@@ -163,10 +163,15 @@
             </label>
             <p class="setting-help">Only allow 3-note combinations. Extensions to 7ths and 9ths are disabled.</p>
             <label class="toggle-row">
-              <input type="checkbox" id="enableInversionBonus" />
+              <input type="checkbox" id="enableInversionBonus" checked />
               <span>Enable Inversion Bonus</span>
             </label>
             <p class="setting-help">Awards a bonus to the main line based on chord inversion. Root position earns the most; 1st and 2nd inversions earn less. Stacks freely with DC/TC multipliers. Not available for augmented or fully diminished 7th chords.</p>
+            <label class="toggle-row">
+              <input type="checkbox" id="enableClaimTiles" />
+              <span>Enable Claim Tiles ★</span>
+            </label>
+            <p class="setting-help">Adds rare ★ claim tiles to the bag (6 in chromatic mode, 3 in diatonic). Place one to reserve a board space for yourself for 3 rounds — opponents cannot play there. Cannot be placed on DC or TC squares. One per rack, one per turn. Requires a new game to change.</p>
           </section>
         </div>
 
@@ -266,6 +271,15 @@
       <div id="boardScoreOverlay" class="board-score-overlay" hidden></div>
     </section>
 
+    <!-- MOBILE PREVIEW STRIP (hidden on desktop; shown between board and rack on narrow screens) -->
+    <div id="mobilePreviewBar" class="mobile-preview-bar" hidden>
+      <div id="mobilePreviewChords" class="mobile-preview-chords"></div>
+      <div class="mobile-preview-meta">
+        <span id="mobilePreviewScore" class="mobile-preview-score"></span>
+        <span id="mobilePreviewError" class="mobile-preview-error"></span>
+      </div>
+    </div>
+
     <!-- BOTTOM: Rack & Actions -->
     <footer class="rack-bar">
       <div class="rack-actions-left">
@@ -331,12 +345,12 @@
     </div>
   </div>
 
-  <script src="data.js?v=12"></script>
-  <script src="state.js?v=12"></script>
-  <script src="chord-engine.js?v=12"></script>
-  <script src="scoring.js?v=12"></script>
-  <script src="audio.js?v=12"></script>
-  <script src="ui.js?v=12"></script>
-  <script src="game.js?v=12"></script>
+  <script src="data.js?v=13"></script>
+  <script src="state.js?v=13"></script>
+  <script src="chord-engine.js?v=13"></script>
+  <script src="scoring.js?v=13"></script>
+  <script src="audio.js?v=13"></script>
+  <script src="ui.js?v=13"></script>
+  <script src="game.js?v=13"></script>
 </body>
 </html>
