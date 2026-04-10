@@ -27,7 +27,15 @@
   CT.TILE_POINTS = {};
   CT.NATURAL_NOTES.forEach(function (n) { CT.TILE_POINTS[n] = 2; });
   CT.ACCIDENTAL_NOTES.forEach(function (n) { CT.TILE_POINTS[n] = 3; });
-  CT.TILE_POINTS["WILD"] = 0;
+  CT.TILE_POINTS["WILD"]  = 0;
+  CT.TILE_POINTS["CLAIM"] = 0;
+
+  /* ── Claim tile ─────────────────────────────────────────────────────── */
+
+  CT.CLAIM_TILE_NOTE = "CLAIM";
+  // Chromatic mode: 6 claim tiles in bag  |  Diatonic mode: 3
+  CT.CLAIM_TILE_COUNT_CHROMATIC = 6;
+  CT.CLAIM_TILE_COUNT_NATURAL   = 3;
 
   /* ── Tile distributions ─────────────────────────────────────────────── */
 
@@ -229,7 +237,8 @@
     selectedBoardVariantId: "pure-balance",
     enableBlockedSpaces: true,
     triadsOnlyMode: false,
-    enableInversionBonus: false
+    enableInversionBonus: true,
+    enableClaimTiles: false
   };
 
   /* ── Board Variants ─────────────────────────────────────────────────── */
