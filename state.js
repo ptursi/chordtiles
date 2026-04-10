@@ -214,6 +214,7 @@
     return {
       placedTiles: [],        // { row, col, tile } — normal note tiles
       placedClaimTile: null,  // { row, col, tile } — max one claim tile per turn
+      stolenClaimData: null,  // saved opponent claim during a steal; finalized on confirm
       previewGroups: [],
       previewScore: 0,
       previewErrors: [],
@@ -330,13 +331,19 @@
     // Cannot self-steal (refreshing own timer)
     if (cell.claimedByPlayerIndex === st.currentPlayerIndex) return false;
 
-    // ── Steal: existing opponent claim → return their tile to the bag ─────
+    // ── Steal: save opponent's claim — do NOT return to bag yet ──────────
+    // The stolen data is kept in turnState.stolenClaimData so that if the
+    // current player recalls before confirming, the original claim is restored.
+    // The tile goes to the bag only when the move is confirmed.
     if (cell.claimedByPlayerIndex >= 0) {
-      if (cell.claimTileRef) {
-        st.bag.push(cell.claimTileRef);
-        shuffle(st.bag);
-      }
-      // Clear opponent's claim (overwritten below)
+      st.turnState.stolenClaimData = {
+        row: row,
+        col: col,
+        playerIndex:   cell.claimedByPlayerIndex,
+        expiresAtTurn: cell.claimExpiresAtTurn,
+        tileRef:       cell.claimTileRef
+      };
+      // Clear for overwrite — Player 2's claim data is written below
       cell.claimedByPlayerIndex = -1;
       cell.claimExpiresAtTurn   = 0;
       cell.claimTileRef         = null;
@@ -386,6 +393,16 @@
     // Clear from turn state
     st.turnState.placedClaimTile = null;
 
+    // If this was a steal, restore the original opponent claim so the board
+    // returns to its pre-turn state (the steal is only permanent on confirm).
+    if (st.turnState.stolenClaimData) {
+      var scd = st.turnState.stolenClaimData;
+      cell.claimedByPlayerIndex = scd.playerIndex;
+      cell.claimExpiresAtTurn   = scd.expiresAtTurn;
+      cell.claimTileRef         = scd.tileRef;
+      st.turnState.stolenClaimData = null;
+    }
+
     CT.emit("tile-removed", { row: row, col: col, tile: claimTile, isClaim: true });
     return true;
   };
@@ -417,6 +434,13 @@
         lockCell.claimTileRef         = null;
       }
     });
+
+    // Finalize any steal: the stolen tile now permanently goes to the bag
+    if (st.turnState.stolenClaimData && st.turnState.stolenClaimData.tileRef) {
+      st.bag.push(st.turnState.stolenClaimData.tileRef);
+      shuffle(st.bag);
+      st.turnState.stolenClaimData = null;
+    }
 
     // Apply score (0 for claim-only turns)
     player.score += scoreResult ? scoreResult.totalScore : 0;
