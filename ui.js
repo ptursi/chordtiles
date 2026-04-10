@@ -52,6 +52,7 @@
     els.enableBlockedSpaces = document.getElementById("enableBlockedSpaces");
     els.triadsOnlyMode = document.getElementById("triadsOnlyMode");
     els.enableInversionBonus = document.getElementById("enableInversionBonus");
+    els.enableClaimTiles = document.getElementById("enableClaimTiles");
 
     els.gameContainer = document.getElementById("gameContainer");
     els.board = document.getElementById("board");
@@ -66,6 +67,10 @@
     els.previewChords = document.getElementById("previewChords");
     els.previewScore = document.getElementById("previewScore");
     els.previewError = document.getElementById("previewError");
+    els.mobilePreviewBar = document.getElementById("mobilePreviewBar");
+    els.mobilePreviewChords = document.getElementById("mobilePreviewChords");
+    els.mobilePreviewScore = document.getElementById("mobilePreviewScore");
+    els.mobilePreviewError = document.getElementById("mobilePreviewError");
     els.boardScoreOverlay = document.getElementById("boardScoreOverlay");
     els.bonusPanel = document.getElementById("bonusPanel");
     els.bonusList = document.getElementById("bonusList");
@@ -176,9 +181,18 @@
     var existing = div.querySelector(".board-tile");
     if (existing) existing.remove();
 
-    // Reset tile-related classes
-    div.classList.remove("cell-has-tile", "cell-has-locked-tile",
-      "cell-drop-target", "cell-valid-group", "cell-invalid-group", "cell-chord-glow");
+    // Reset tile-related classes (including claim state and preview-only classes).
+    // cell-triads-blocked is a preview-only class that must never persist on an
+    // occupied or freshly-updated cell — clear it unconditionally here.
+    div.classList.remove(
+      "cell-has-tile", "cell-has-locked-tile",
+      "cell-drop-target", "cell-valid-group", "cell-invalid-group", "cell-chord-glow",
+      "cell-claim-mine", "cell-claim-opponent",
+      "cell-triads-blocked"
+    );
+    div.style.removeProperty("--claim-color");
+    div.removeAttribute("data-claim-rounds");
+    div.removeAttribute("title");
 
     if (cell.tile) {
       div.classList.add("cell-has-tile");
@@ -216,6 +230,26 @@
     } else {
       var lbl = div.querySelector(".cell-label");
       if (lbl) lbl.style.display = "";
+
+      // Render claim state for empty cells
+      if (CT.state && cell.claimedByPlayerIndex >= 0) {
+        var ownerIdx   = cell.claimedByPlayerIndex;
+        var ownerColor = CT.PLAYER_COLORS[ownerIdx] || "#888888";
+        var ownerName  = (CT.state.players[ownerIdx] && CT.state.players[ownerIdx].name)
+                           || ("Player " + (ownerIdx + 1));
+        var roundsLeft = CT.getClaimRoundsLeft ? CT.getClaimRoundsLeft(cell) : 0;
+        var roundWord  = roundsLeft === 1 ? "round" : "rounds";
+
+        div.style.setProperty("--claim-color", ownerColor);
+        div.dataset.claimRounds = roundsLeft;
+        div.title = "Reserved by " + ownerName + " \u00B7 " + roundsLeft + " " + roundWord + " left";
+
+        if (ownerIdx === CT.state.currentPlayerIndex) {
+          div.classList.add("cell-claim-mine");
+        } else {
+          div.classList.add("cell-claim-opponent");
+        }
+      }
     }
   };
 
@@ -224,81 +258,29 @@
   };
 
   /**
-   * Returns true if placing any available note at (r, c) along `axis` ('h' or 'v')
-   * cannot extend the adjacent tile group to a new valid chord.
-   * Considers ALL tiles currently on the board (locked + placed this turn) so that
-   * blocking previews update live as the player places tiles before confirming.
-   * Only fires for endpoint cells (tiles on exactly one side, ≥2 of them, forming
-   * a valid chord).
+   * Re-render every cell that carries a claim tile so owner/opponent coloring
+   * updates correctly when the active player changes (pass-and-play).
+   * Only touches claimed cells, leaving locked note tiles untouched.
    */
-  function isChordBoundaryBlocked(r, c, axis, enabledNotes) {
-    var board = CT.state.board;
-    var before = [], after = [];
-
-    if (axis === "h") {
-      for (var cc = c - 1; cc >= 0; cc--) {
-        if (board[r][cc].tile) before.unshift(board[r][cc]);
-        else break;
-      }
-      for (var cc2 = c + 1; cc2 < 15; cc2++) {
-        if (board[r][cc2].tile) after.push(board[r][cc2]);
-        else break;
-      }
-    } else {
-      for (var rr = r - 1; rr >= 0; rr--) {
-        if (board[rr][c].tile) before.unshift(board[rr][c]);
-        else break;
-      }
-      for (var rr2 = r + 1; rr2 < 15; rr2++) {
-        if (board[rr2][c].tile) after.push(board[rr2][c]);
-        else break;
+  CT.ui.updateAllClaimOverlays = function () {
+    if (!CT.state) return;
+    for (var r = 0; r < 15; r++) {
+      for (var c = 0; c < 15; c++) {
+        var cl = CT.state.board[r][c];
+        if (cl.claimedByPlayerIndex >= 0) {
+          CT.ui.updateCell(r, c);
+        }
       }
     }
-
-    // Only endpoint cells: tiles on exactly one side
-    var hasBefore = before.length > 0;
-    var hasAfter  = after.length > 0;
-    if (hasBefore === hasAfter) return false; // middle of a line or isolated
-
-    var lockedGroup = hasBefore ? before : after;
-    if (lockedGroup.length < 2) return false; // need ≥2 tiles to form a chord
-
-    // Collect existing pitch classes from the locked group
-    var existingPCs = [];
-    for (var i = 0; i < lockedGroup.length; i++) {
-      var lNote = CT.getEffectiveNote(lockedGroup[i].tile);
-      if (lNote) {
-        var lpc = CT.NOTE_TO_PITCH_CLASS[lNote];
-        if (lpc !== undefined && lpc >= 0) existingPCs.push(lpc);
-      }
-    }
-
-    // The locked group must itself be a valid chord
-    var existingChord = CT.detectExactChord(existingPCs);
-    if (!existingChord) return false;
-
-    // Check whether any enabled note can extend it to a DIFFERENT valid chord
-    for (var n = 0; n < enabledNotes.length; n++) {
-      var newPC = CT.NOTE_TO_PITCH_CLASS[enabledNotes[n]];
-      if (newPC === undefined || newPC < 0) continue;
-      var testPCs = existingPCs.concat([newPC]);
-      var newChord = CT.detectExactChord(testPCs);
-      if (newChord &&
-          (newChord.chordType !== existingChord.chordType ||
-           newChord.root      !== existingChord.root)) {
-        return false; // at least one note can form a new chord — not blocked
-      }
-    }
-
-    return true; // no note can extend this chord to anything new — block the cell
-  }
+  };
 
   /**
-   * Mark empty cells that cannot legally receive a tile:
-   *   1. Triads Only mode: would make a line exceed 3 tiles
-   *   2. Chord boundary: the adjacent tile group (locked + placed this turn) cannot
-   *      be extended to a new valid chord by any note — preview updates live.
-   * Call this whenever the board state changes.
+   * Mark empty cells that cannot legally receive ANY note tile:
+   *   1. Triads Only mode: placing here would push a line past 3 tiles.
+   *   2. Chord boundary: no enabled note, when placed here, could make the
+   *      resulting contiguous group (locked + placed this turn, on both sides)
+   *      a valid chord — preview updates live as tiles are placed / recalled.
+   * Call this whenever the board state changes (placement, recall, turn start).
    */
   CT.ui.updateTriadsBlocking = function () {
     if (!CT.state) {
@@ -326,6 +308,9 @@
         var cell = CT.state.board[r][c];
         // Skip cells that already have a tile or are physically blocked
         if (cell.tile || cell.isBlocked) continue;
+        // Skip opponent-claimed cells (they render their own "blocked" style)
+        if (cell.claimedByPlayerIndex >= 0 &&
+            cell.claimedByPlayerIndex !== CT.state.currentPlayerIndex) continue;
 
         var blocked = false;
 
@@ -338,13 +323,15 @@
           if (left + right >= 3 || up + down >= 3) blocked = true;
         }
 
-        // ── 2. Chord boundary blocking (always active) ───────────────────────
+        // ── 2. Chord boundary blocking — delegates to chord-engine.js ───────
+        // CT.isCellAutoBlocked is the single source of truth; it uses the same
+        // detectExactChord logic and "new chord identity" rule as validatePlacement.
         if (!blocked) {
-          blocked = isChordBoundaryBlocked(r, c, "h", enabledNotes) ||
-                    isChordBoundaryBlocked(r, c, "v", enabledNotes);
+          blocked = CT.isCellAutoBlocked(r, c, enabledNotes);
         }
 
-        if (blocked) div.classList.add("cell-triads-blocked");
+        // Safety guard: never mark occupied cells as blocked (belt-and-suspenders).
+        if (blocked && !cell.tile) div.classList.add("cell-triads-blocked");
       }
     }
   };
@@ -409,18 +396,19 @@
 
       var div = document.createElement("div");
       div.className = "rack-tile";
-      if (tile.isWild) div.classList.add("is-wild");
+      if (tile.isWild)  div.classList.add("is-wild");
+      if (tile.isClaim) div.classList.add("is-claim");
       div.dataset.tileId = tile.id;
       div.dataset.rackIndex = i;
 
       var note = document.createElement("span");
       note.className = "rack-tile-note";
-      note.textContent = tile.isWild ? "W" : tile.note;
+      note.textContent = tile.isClaim ? "★" : (tile.isWild ? "W" : tile.note);
       div.appendChild(note);
 
       var pts = document.createElement("span");
       pts.className = "rack-tile-points";
-      pts.textContent = tile.points;
+      pts.textContent = tile.points;  // 0 for both wild and claim
       div.appendChild(pts);
 
       // Tap to select
@@ -460,6 +448,26 @@
     updateRackSelection();
   }
 
+  /**
+   * Display an error message in the preview panel.
+   * Makes the panel visible if it is currently hidden so the player sees the message.
+   */
+  function showPreviewError(message) {
+    if (!els.previewError) return;
+    els.previewError.textContent = message || "";
+    // Ensure the preview panel is visible so the player can read the message
+    if (els.previewPanel && message) {
+      els.previewPanel.hidden = false;
+    }
+    // Mirror to mobile strip
+    if (els.mobilePreviewBar && message) {
+      els.mobilePreviewBar.hidden = false;
+      if (els.mobilePreviewChords) els.mobilePreviewChords.innerHTML = "";
+      if (els.mobilePreviewScore)  els.mobilePreviewScore.textContent  = "";
+      if (els.mobilePreviewError)  els.mobilePreviewError.textContent  = message;
+    }
+  }
+
   function updateRackSelection() {
     rackElements.forEach(function (el) {
       if (!el) return;
@@ -476,8 +484,9 @@
     var row = parseInt(e.currentTarget.dataset.row);
     var col = parseInt(e.currentTarget.dataset.col);
     var cell = CT.state.board[row][col];
+    var cellDiv2 = e.currentTarget;
 
-    // If cell has a tile placed this turn, return it to rack
+    // If cell has a note tile placed this turn, return it to rack
     if (cell.tile && !cell.isLocked) {
       var removed = CT.removeTileFromBoard(row, col);
       if (removed) {
@@ -488,36 +497,84 @@
       }
     }
 
-    // If we have a selected rack tile and cell is empty (and not triads-blocked), place it
-    var cellDiv2 = e.currentTarget;
-    if (selectedRackTile && !cell.tile && !cell.isBlocked &&
-        !cellDiv2.classList.contains("cell-triads-blocked")) {
-      var tile = selectedRackTile;
-      selectedRackTile = null;
+    // If this cell has a pending claim placed this turn (owner taps to recall)
+    var ptc = CT.state.turnState.placedClaimTile;
+    if (ptc && ptc.row === row && ptc.col === col) {
+      CT.removeClaimTileFromBoard(row, col);
+      CT.ui.updateCell(row, col);
+      CT.ui.renderRack();
+      CT.emit("placement-changed");
+      return;
+    }
 
-      // If wild tile, prompt for note assignment first
-      if (tile.isWild && !tile.assignedNote) {
-        showWildPicker(tile, function () {
-          CT.placeTileOnBoard(row, col, tile);
-          CT.ui.updateCell(row, col);
-          CT.ui.renderRack();
-          CT.emit("placement-changed");
-        });
+    // Cannot place on opponent-claimed cells — UNLESS placing a claim tile (steal)
+    if (cellDiv2.classList.contains("cell-claim-opponent")) {
+      if (!selectedRackTile || !selectedRackTile.isClaim) return;
+      // Fall through: claim tile placement on opponent-claimed cells is handled below
+    }
+
+    // Must have a selected rack tile to place
+    if (!selectedRackTile) return;
+
+    var tile = selectedRackTile;
+
+    // ── Claim tile placement (including steal) ────────────────────────────
+    if (tile.isClaim) {
+      if (!CT.state.settings.enableClaimTiles) return;
+      // Block if already have a claim placed this turn
+      if (CT.state.turnState.placedClaimTile) {
+        showPreviewError("Only one claim tile may be placed per turn.");
+        updateRackSelection();
+        return;
+      }
+      var claimResult = CT.validateClaimPlacement(
+        row, col, CT.state.board, CT.isFirstMove(),
+        CT.getPlacedTilePositions(), CT.state.currentPlayerIndex
+      );
+      if (!claimResult.valid) {
+        showPreviewError(claimResult.error);
+        updateRackSelection();
         return;
       }
 
-      CT.placeTileOnBoard(row, col, tile);
+      selectedRackTile = null;
+      CT.placeClaimTileOnBoard(row, col, tile);
       CT.ui.updateCell(row, col);
       CT.ui.renderRack();
-
-      // Play note on placement
-      if (CT.state.settings.enableEarTraining && CT.state.settings.autoPlayTileOnTap) {
-        var pNote = CT.getEffectiveNote(tile);
-        if (pNote) CT.playNote(pNote);
-      }
-
       CT.emit("placement-changed");
+      return;
     }
+
+    // ── Normal tile placement ─────────────────────────────────────────────
+    if (cell.tile || cell.isBlocked ||
+        cellDiv2.classList.contains("cell-triads-blocked")) {
+      return; // cannot place here
+    }
+
+    selectedRackTile = null;
+
+    // If wild tile, prompt for note assignment first
+    if (tile.isWild && !tile.assignedNote) {
+      showWildPicker(tile, function () {
+        CT.placeTileOnBoard(row, col, tile);
+        CT.ui.updateCell(row, col);
+        CT.ui.renderRack();
+        CT.emit("placement-changed");
+      });
+      return;
+    }
+
+    CT.placeTileOnBoard(row, col, tile);
+    CT.ui.updateCell(row, col);
+    CT.ui.renderRack();
+
+    // Play note on placement
+    if (CT.state.settings.enableEarTraining && CT.state.settings.autoPlayTileOnTap) {
+      var pNote = CT.getEffectiveNote(tile);
+      if (pNote) CT.playNote(pNote);
+    }
+
+    CT.emit("placement-changed");
   }
 
   /* ── Drag and drop (pointer events) ─────────────────────────────────── */
@@ -557,11 +614,28 @@
         clearDropHighlight();
         if (target) {
           var cellDiv = target.closest(".cell");
-          if (cellDiv && !cellDiv.classList.contains("cell-blocked") &&
+          var dsTile = dragState ? dragState.tile : null;
+          var isClaimDrag = dsTile && dsTile.isClaim;
+
+          if (cellDiv &&
+              !cellDiv.classList.contains("cell-blocked") &&
               !cellDiv.classList.contains("cell-triads-blocked") &&
               !cellDiv.classList.contains("cell-has-tile")) {
-            cellDiv.classList.add("cell-drop-target");
-            dragState.targetCell = cellDiv;
+
+            if (cellDiv.classList.contains("cell-claim-opponent")) {
+              // Only claim tiles may target opponent-claimed cells (steal)
+              if (isClaimDrag) {
+                cellDiv.classList.add("cell-drop-target");
+                dragState.targetCell = cellDiv;
+              } else {
+                dragState.targetCell = null;
+              }
+            } else if (isClaimDrag && cellDiv.classList.contains("cell-claim-mine")) {
+              dragState.targetCell = null; // cannot self-steal
+            } else {
+              cellDiv.classList.add("cell-drop-target");
+              dragState.targetCell = cellDiv;
+            }
           } else {
             dragState.targetCell = null;
           }
@@ -585,8 +659,11 @@
   function startDrag(tile, x, y) {
     var ghost = document.createElement("div");
     ghost.className = "drag-ghost";
-    if (tile.isWild) ghost.classList.add("is-wild");
-    ghost.textContent = tile.isWild ? (tile.assignedNote || "W") : tile.note;
+    if (tile.isWild)  ghost.classList.add("is-wild");
+    if (tile.isClaim) ghost.classList.add("is-claim");
+    ghost.textContent = tile.isClaim ? "★"
+                      : tile.isWild  ? (tile.assignedNote || "W")
+                      : tile.note;
     ghost.style.left = x + "px";
     ghost.style.top = y + "px";
     document.body.appendChild(ghost);
@@ -616,6 +693,31 @@
       var row = parseInt(target.dataset.row);
       var col = parseInt(target.dataset.col);
 
+      // ── Claim tile drop (including steal onto opponent-claimed cells) ────
+      if (tile.isClaim) {
+        if (CT.state.settings.enableClaimTiles) {
+          if (CT.state.turnState.placedClaimTile) {
+            showPreviewError("Only one claim tile may be placed per turn.");
+          } else {
+            var dropClaimResult = CT.validateClaimPlacement(
+              row, col, CT.state.board, CT.isFirstMove(),
+              CT.getPlacedTilePositions(), CT.state.currentPlayerIndex
+            );
+            if (dropClaimResult.valid) {
+              CT.placeClaimTileOnBoard(row, col, tile);
+              CT.ui.updateCell(row, col);
+              CT.ui.renderRack();
+              CT.emit("placement-changed");
+            } else {
+              showPreviewError(dropClaimResult.error);
+            }
+          }
+        }
+        dragState = null;
+        return;
+      }
+
+      // ── Normal tile drop ────────────────────────────────────────────────
       if (tile.isWild && !tile.assignedNote) {
         var capturedRow = row, capturedCol = col;
         dragState = null;
@@ -721,18 +823,44 @@
 
   /* ── Preview panel ──────────────────────────────────────────────────── */
 
-  CT.ui.updatePreview = function (validationResult, scoreResult) {
-    var placed = CT.getPlacedTilePositions();
+  /** Mirror preview content to the mobile strip in lockstep with the sidebar panel. */
+  function syncMobilePreview(chordsHtml, scoreText, errorText, show) {
+    if (!els.mobilePreviewBar) return;
+    els.mobilePreviewBar.hidden = !show;
+    if (!show) return;
+    if (els.mobilePreviewChords) els.mobilePreviewChords.innerHTML = chordsHtml || "";
+    if (els.mobilePreviewScore)  els.mobilePreviewScore.textContent  = scoreText  || "";
+    if (els.mobilePreviewError)  els.mobilePreviewError.textContent  = errorText  || "";
+  }
 
-    if (placed.length === 0) {
+  CT.ui.updatePreview = function (validationResult, scoreResult) {
+    var placed      = CT.getPlacedTilePositions();
+    var claimPlaced = CT.getPlacedClaimTile();
+
+    if (placed.length === 0 && !claimPlaced) {
       els.previewPanel.hidden = true;
       els.confirmMoveBtn.disabled = true;
       CT.ui.highlightGroups(null, null);
       if (els.boardScoreOverlay) els.boardScoreOverlay.hidden = true;
+      syncMobilePreview("", "", "", false);
       return;
     }
 
     els.previewPanel.hidden = false;
+
+    // ── Claim-only turn (no note tiles placed) ────────────────────────────
+    if (placed.length === 0 && claimPlaced) {
+      CT.ui.highlightGroups(null, null);
+      var cpColor = CT.PLAYER_COLORS[CT.state.currentPlayerIndex] || "#888";
+      var claimHtml = '<span class="preview-chord-tag preview-claim-tag" style="border-color:' + cpColor + ';color:' + cpColor + '">★ Space Claimed (0 pts)</span>';
+      els.previewChords.innerHTML = claimHtml;
+      els.previewScore.textContent = "Total: 0 points";
+      els.previewError.textContent = "";
+      els.confirmMoveBtn.disabled = false;
+      if (els.boardScoreOverlay) els.boardScoreOverlay.hidden = true;
+      syncMobilePreview(claimHtml, "Total: 0 points", "", true);
+      return;
+    }
 
     if (!validationResult) {
       els.previewChords.innerHTML = "";
@@ -740,6 +868,7 @@
       els.previewError.textContent = "";
       els.confirmMoveBtn.disabled = true;
       if (els.boardScoreOverlay) els.boardScoreOverlay.hidden = true;
+      syncMobilePreview("", "", "", false);
       return;
     }
 
@@ -748,7 +877,7 @@
 
     if (validationResult.valid && scoreResult) {
       var invEnabled = CT.state && CT.state.settings.enableInversionBonus;
-      els.previewChords.innerHTML = scoreResult.chords.map(function (c) {
+      var chordsHtml = scoreResult.chords.map(function (c) {
         var html = '<span class="preview-chord-tag">' + esc(c.displayName) + ' (+' + c.groupScore + ')</span>';
         if (invEnabled && c.isMainLine && c.inversionLabel !== null) {
           if (c.inversionBonus > 0) {
@@ -759,19 +888,29 @@
         }
         return html;
       }).join("");
-      els.previewScore.textContent = "Total: " + scoreResult.totalScore + " points";
+      // Append claim indicator if a claim tile was also placed
+      if (claimPlaced) {
+        var pColor = CT.PLAYER_COLORS[CT.state.currentPlayerIndex] || "#888";
+        chordsHtml += '<span class="preview-chord-tag preview-claim-tag" style="border-color:' + pColor + ';color:' + pColor + '">★ Also claiming a space</span>';
+      }
+      var scoreText = "Total: " + scoreResult.totalScore + " points";
+      els.previewChords.innerHTML = chordsHtml;
+      els.previewScore.textContent = scoreText;
       els.previewError.textContent = "";
       els.confirmMoveBtn.disabled = false;
       if (els.boardScoreOverlay) {
         els.boardScoreOverlay.hidden = false;
         els.boardScoreOverlay.textContent = "+" + scoreResult.totalScore + " pts";
       }
+      syncMobilePreview(chordsHtml, scoreText, "", true);
     } else {
+      var errText = validationResult.errors.join(" ");
       els.previewChords.innerHTML = "";
       els.previewScore.textContent = "";
-      els.previewError.textContent = validationResult.errors.join(" ");
+      els.previewError.textContent = errText;
       els.confirmMoveBtn.disabled = true;
       if (els.boardScoreOverlay) els.boardScoreOverlay.hidden = true;
+      syncMobilePreview("", "", errText, true);
     }
   };
 
@@ -860,8 +999,9 @@
     player.rack.forEach(function (tile) {
       var div = document.createElement("div");
       div.className = "swap-tile";
-      if (tile.isWild) div.classList.add("is-wild");
-      div.textContent = tile.isWild ? "W" : tile.note;
+      if (tile.isWild)  div.classList.add("is-wild");
+      if (tile.isClaim) div.classList.add("is-claim");
+      div.textContent = tile.isClaim ? "★" : (tile.isWild ? "W" : tile.note);
       div.dataset.tileId = tile.id;
       div.addEventListener("click", function () {
         var idx = swapSelected.indexOf(tile.id);
@@ -1088,7 +1228,8 @@
       selectedBoardVariantId: selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID,
       enableBlockedSpaces: els.enableBlockedSpaces ? els.enableBlockedSpaces.checked : true,
       triadsOnlyMode: els.triadsOnlyMode ? els.triadsOnlyMode.checked : false,
-      enableInversionBonus: els.enableInversionBonus ? els.enableInversionBonus.checked : false
+      enableInversionBonus: els.enableInversionBonus ? els.enableInversionBonus.checked : true,
+      enableClaimTiles: els.enableClaimTiles ? els.enableClaimTiles.checked : false
     };
   };
 
