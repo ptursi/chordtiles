@@ -26,7 +26,7 @@
     for (var i = 0; i < chordResults.length; i++) {
       var cr = chordResults[i];
       var group = cr.group;
-      var gs = scoreGroup(group.cells, cr, board, placedSet);
+      var gs = scoreGroup(group.cells, cr, board, placedSet, group.isMainLine);
       groupScores.push(gs);
       totalScore += gs.groupTotal;
       chords.push({
@@ -36,7 +36,10 @@
         groupScore: gs.groupTotal,
         tilePoints: gs.tilePoints,
         chordBonus: gs.chordBonus,
-        premiumBonus: gs.premiumBonus
+        premiumBonus: gs.premiumBonus,
+        isMainLine: group.isMainLine,
+        inversionBonus: gs.inversionBonus,
+        inversionLabel: gs.inversionLabel
       });
     }
 
@@ -49,8 +52,9 @@
 
   /**
    * Score a single group using the 7-step pipeline.
+   * @param {boolean} isMainGroup  True only for the main placement line.
    */
-  function scoreGroup(cells, chordResult, board, placedSet) {
+  function scoreGroup(cells, chordResult, board, placedSet, isMainGroup) {
     var bonusPts = CT.CHORD_BONUS_POINTS;
     if (CT.state && CT.state.settings.enableVariantMode) {
       bonusPts = Object.assign({}, bonusPts, CT.VARIANT_CHORD_BONUS_POINTS);
@@ -115,6 +119,22 @@
 
     var chordBonusTotal = chordBonus * chordMultiplier;
 
+    // Step 5b: Inversion bonus — main line only, applied to base chord value only.
+    // DC/TC chord multipliers and inversion bonus are independent and stack freely.
+    // Cross-groups never receive this bonus (isMainGroup === false).
+    // Augmented, fully diminished 7th, and sus4 return bonusPct=0 from
+    // CT.getInversionClassification so they are excluded automatically.
+    var inversionBonus = 0;
+    var inversionLabel = null; // null = feature off / not the main group
+
+    if (isMainGroup && CT.state && CT.state.settings.enableInversionBonus) {
+      var invResult = CT.getInversionClassification(cells, chordResult);
+      inversionLabel = invResult.label;
+      if (invResult.bonusPct > 0) {
+        inversionBonus = Math.round(chordBonus * invResult.bonusPct / 100);
+      }
+    }
+
     // Step 6: Cadence bonus (+10 if CS square and chord is 7th or 9th)
     var cadenceBonus = 0;
     if (CT.SEVENTH_OR_NINTH_TYPES.has(chordResult.chordType)) {
@@ -128,10 +148,11 @@
     }
 
     // Step 7: Sum
-    var groupTotal = tilePointsTotal + chordBonusTotal + cadenceBonus;
+    var groupTotal = tilePointsTotal + chordBonusTotal + cadenceBonus + inversionBonus;
 
     // Premium bonus = everything beyond base tile points + base chord bonus
     // i.e. tile multiplier additions + chord multiplier additions + cadence bonus
+    // NOTE: inversionBonus is tracked separately and not folded into premiumBonus.
     var premiumBonus = (tilePointsTotal - baseTilePointsTotal) + (chordBonusTotal - chordBonus) + cadenceBonus;
 
     return {
@@ -142,6 +163,8 @@
       chordMultiplier: chordMultiplier,
       chordBonusTotal: chordBonusTotal,
       cadenceBonus: cadenceBonus,
+      inversionBonus: inversionBonus,
+      inversionLabel: inversionLabel,
       premiumBonus: premiumBonus,
       groupTotal: groupTotal,
       chordType: chordResult.chordType,
