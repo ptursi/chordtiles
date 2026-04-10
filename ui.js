@@ -51,6 +51,7 @@
     els.setupBackBtn = document.getElementById("setupBackBtn");
     els.enableBlockedSpaces = document.getElementById("enableBlockedSpaces");
     els.triadsOnlyMode = document.getElementById("triadsOnlyMode");
+    els.enableInversionBonus = document.getElementById("enableInversionBonus");
 
     els.gameContainer = document.getElementById("gameContainer");
     els.board = document.getElementById("board");
@@ -223,54 +224,127 @@
   };
 
   /**
-   * In Triads Only mode, mark empty cells that would extend any existing tile
-   * group beyond 3 tiles as visually blocked (dark, like actual blocked squares).
-   * Considers all tiles currently on the board (locked + placed this turn).
+   * Returns true if placing any available note at (r, c) along `axis` ('h' or 'v')
+   * cannot extend the adjacent tile group to a new valid chord.
+   * Considers ALL tiles currently on the board (locked + placed this turn) so that
+   * blocking previews update live as the player places tiles before confirming.
+   * Only fires for endpoint cells (tiles on exactly one side, ≥2 of them, forming
+   * a valid chord).
+   */
+  function isChordBoundaryBlocked(r, c, axis, enabledNotes) {
+    var board = CT.state.board;
+    var before = [], after = [];
+
+    if (axis === "h") {
+      for (var cc = c - 1; cc >= 0; cc--) {
+        if (board[r][cc].tile) before.unshift(board[r][cc]);
+        else break;
+      }
+      for (var cc2 = c + 1; cc2 < 15; cc2++) {
+        if (board[r][cc2].tile) after.push(board[r][cc2]);
+        else break;
+      }
+    } else {
+      for (var rr = r - 1; rr >= 0; rr--) {
+        if (board[rr][c].tile) before.unshift(board[rr][c]);
+        else break;
+      }
+      for (var rr2 = r + 1; rr2 < 15; rr2++) {
+        if (board[rr2][c].tile) after.push(board[rr2][c]);
+        else break;
+      }
+    }
+
+    // Only endpoint cells: tiles on exactly one side
+    var hasBefore = before.length > 0;
+    var hasAfter  = after.length > 0;
+    if (hasBefore === hasAfter) return false; // middle of a line or isolated
+
+    var lockedGroup = hasBefore ? before : after;
+    if (lockedGroup.length < 2) return false; // need ≥2 tiles to form a chord
+
+    // Collect existing pitch classes from the locked group
+    var existingPCs = [];
+    for (var i = 0; i < lockedGroup.length; i++) {
+      var lNote = CT.getEffectiveNote(lockedGroup[i].tile);
+      if (lNote) {
+        var lpc = CT.NOTE_TO_PITCH_CLASS[lNote];
+        if (lpc !== undefined && lpc >= 0) existingPCs.push(lpc);
+      }
+    }
+
+    // The locked group must itself be a valid chord
+    var existingChord = CT.detectExactChord(existingPCs);
+    if (!existingChord) return false;
+
+    // Check whether any enabled note can extend it to a DIFFERENT valid chord
+    for (var n = 0; n < enabledNotes.length; n++) {
+      var newPC = CT.NOTE_TO_PITCH_CLASS[enabledNotes[n]];
+      if (newPC === undefined || newPC < 0) continue;
+      var testPCs = existingPCs.concat([newPC]);
+      var newChord = CT.detectExactChord(testPCs);
+      if (newChord &&
+          (newChord.chordType !== existingChord.chordType ||
+           newChord.root      !== existingChord.root)) {
+        return false; // at least one note can form a new chord — not blocked
+      }
+    }
+
+    return true; // no note can extend this chord to anything new — block the cell
+  }
+
+  /**
+   * Mark empty cells that cannot legally receive a tile:
+   *   1. Triads Only mode: would make a line exceed 3 tiles
+   *   2. Chord boundary: the adjacent tile group (locked + placed this turn) cannot
+   *      be extended to a new valid chord by any note — preview updates live.
    * Call this whenever the board state changes.
    */
   CT.ui.updateTriadsBlocking = function () {
+    if (!CT.state) {
+      // Clear everything when there's no state
+      for (var r0 = 0; r0 < 15; r0++) {
+        for (var c0 = 0; c0 < 15; c0++) {
+          var d0 = cellElements[r0] && cellElements[r0][c0];
+          if (d0) d0.classList.remove("cell-triads-blocked");
+        }
+      }
+      return;
+    }
+
+    var triadsOn    = CT.state.settings.triadsOnlyMode;
+    var enabledNotes = CT.state.settings.includeAccidentals
+      ? CT.PITCH_NAMES_FROM_C
+      : CT.NATURAL_NOTES;
+
     for (var r = 0; r < 15; r++) {
       for (var c = 0; c < 15; c++) {
         var div = cellElements[r] && cellElements[r][c];
         if (!div) continue;
         div.classList.remove("cell-triads-blocked");
 
-        if (!CT.state || !CT.state.settings.triadsOnlyMode) continue;
-
         var cell = CT.state.board[r][c];
-        // Only check cells that are empty and not already physically blocked
+        // Skip cells that already have a tile or are physically blocked
         if (cell.tile || cell.isBlocked) continue;
 
-        // Count contiguous tiles to the left
-        var left = 0;
-        for (var cc = c - 1; cc >= 0; cc--) {
-          if (CT.state.board[r][cc].tile) left++;
-          else break;
-        }
-        // Count contiguous tiles to the right
-        var right = 0;
-        for (var cc2 = c + 1; cc2 < 15; cc2++) {
-          if (CT.state.board[r][cc2].tile) right++;
-          else break;
-        }
-        // Count contiguous tiles above
-        var up = 0;
-        for (var rr = r - 1; rr >= 0; rr--) {
-          if (CT.state.board[rr][c].tile) up++;
-          else break;
-        }
-        // Count contiguous tiles below
-        var down = 0;
-        for (var rr2 = r + 1; rr2 < 15; rr2++) {
-          if (CT.state.board[rr2][c].tile) down++;
-          else break;
+        var blocked = false;
+
+        // ── 1. Triads-only blocking ──────────────────────────────────────────
+        if (triadsOn && !blocked) {
+          var left  = 0; for (var cc  = c - 1; cc  >= 0  && CT.state.board[r][cc].tile;  cc--)  left++;
+          var right = 0; for (var cc2 = c + 1; cc2 < 15  && CT.state.board[r][cc2].tile; cc2++) right++;
+          var up    = 0; for (var rr  = r - 1; rr  >= 0  && CT.state.board[rr][c].tile;  rr--)  up++;
+          var down  = 0; for (var rr2 = r + 1; rr2 < 15  && CT.state.board[rr2][c].tile; rr2++) down++;
+          if (left + right >= 3 || up + down >= 3) blocked = true;
         }
 
-        // Placing here would create a group of (left+1+right) horizontally
-        // or (up+1+down) vertically. Block if either would exceed 3.
-        if (left + right >= 3 || up + down >= 3) {
-          div.classList.add("cell-triads-blocked");
+        // ── 2. Chord boundary blocking (always active) ───────────────────────
+        if (!blocked) {
+          blocked = isChordBoundaryBlocked(r, c, "h", enabledNotes) ||
+                    isChordBoundaryBlocked(r, c, "v", enabledNotes);
         }
+
+        if (blocked) div.classList.add("cell-triads-blocked");
       }
     }
   };
@@ -673,8 +747,17 @@
     CT.ui.highlightGroups(validationResult.groups, validationResult.chordResults);
 
     if (validationResult.valid && scoreResult) {
+      var invEnabled = CT.state && CT.state.settings.enableInversionBonus;
       els.previewChords.innerHTML = scoreResult.chords.map(function (c) {
-        return '<span class="preview-chord-tag">' + esc(c.displayName) + ' (+' + c.groupScore + ')</span>';
+        var html = '<span class="preview-chord-tag">' + esc(c.displayName) + ' (+' + c.groupScore + ')</span>';
+        if (invEnabled && c.isMainLine && c.inversionLabel !== null) {
+          if (c.inversionBonus > 0) {
+            html += '<span class="preview-inversion-info">Inversion: ' + esc(c.inversionLabel) + ' <strong>(+' + c.inversionBonus + ')</strong></span>';
+          } else {
+            html += '<span class="preview-inversion-info">Inversion Bonus: <em>none</em></span>';
+          }
+        }
+        return html;
       }).join("");
       els.previewScore.textContent = "Total: " + scoreResult.totalScore + " points";
       els.previewError.textContent = "";
@@ -1004,7 +1087,8 @@
       enableTileSwap: els.enableTileSwap.checked,
       selectedBoardVariantId: selectedBoardVariantId || CT.DEFAULT_BOARD_VARIANT_ID,
       enableBlockedSpaces: els.enableBlockedSpaces ? els.enableBlockedSpaces.checked : true,
-      triadsOnlyMode: els.triadsOnlyMode ? els.triadsOnlyMode.checked : false
+      triadsOnlyMode: els.triadsOnlyMode ? els.triadsOnlyMode.checked : false,
+      enableInversionBonus: els.enableInversionBonus ? els.enableInversionBonus.checked : false
     };
   };
 
