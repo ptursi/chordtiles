@@ -228,7 +228,8 @@
     enableTileSwap: true,
     selectedBoardVariantId: "pure-balance",
     enableBlockedSpaces: true,
-    triadsOnlyMode: false
+    triadsOnlyMode: false,
+    enableInversionBonus: false
   };
 
   /* ── Board Variants ─────────────────────────────────────────────────── */
