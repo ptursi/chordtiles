@@ -187,7 +187,7 @@
     div.classList.remove(
       "cell-has-tile", "cell-has-locked-tile",
       "cell-drop-target", "cell-valid-group", "cell-invalid-group", "cell-chord-glow",
-      "cell-claim-mine", "cell-claim-opponent",
+      "cell-claim-mine", "cell-claim-opponent", "cell-claim-stealable",
       "cell-triads-blocked"
     );
     div.style.removeProperty("--claim-color");
@@ -248,6 +248,12 @@
           div.classList.add("cell-claim-mine");
         } else {
           div.classList.add("cell-claim-opponent");
+          // If the current player has a claim tile in their rack, the cell is
+          // stealable — add a visual hint so it doesn't appear simply blocked.
+          var curPlayer = CT.state.players[CT.state.currentPlayerIndex];
+          if (curPlayer && curPlayer.rack.some(function (t) { return t.isClaim; })) {
+            div.classList.add("cell-claim-stealable");
+          }
         }
       }
     }
