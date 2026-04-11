@@ -79,11 +79,11 @@
     if (unique.length < 3) return null;
 
     // *** CRITICAL: reject groups with more than 5 unique pitch classes.
-    // No enabled chord type has more than 5 notes, so this group cannot
+    // No enabled chord type has more than 6 notes, so this group cannot
     // possibly form a valid chord as a whole. We return null immediately
     // and do NOT fall back to subset search — that would silently rescue
     // an illegal extended line by finding a chord hidden inside it.
-    if (unique.length > 5) return null;
+    if (unique.length > 6) return null;
 
     // Exact full-set match — no subsets tried.
     return detectFromSet(unique);
@@ -255,7 +255,9 @@
    */
   CT.getInversionClassification = function (cells, chordResult) {
     var seq = INVERSION_SEQUENCES[chordResult.chordType];
-    if (!seq) return { label: "none", bonusPct: 0 };
+    // null label = feature not applicable to this chord type (excluded or scale family).
+    // The UI uses !== null to decide whether to render the inversion row at all.
+    if (!seq) return { label: null, bonusPct: 0 };
 
     var rootPC = CT.NOTE_TO_PITCH_CLASS[chordResult.root];
     if (rootPC === undefined) return { label: "none", bonusPct: 0 };
@@ -647,7 +649,7 @@
       }
 
       // *** BOARD VALIDATION: use exact full-group detection only.
-      // CT.detectExactChord rejects groups with >5 unique pitch classes outright
+      // CT.detectExactChord rejects groups with >6 unique pitch classes outright
       // and never tries subsets. This ensures an extended line that no longer
       // forms a valid chord as a whole cannot score via a hidden inner chord.
       var detection = CT.detectExactChord(pitchClasses);
@@ -795,7 +797,7 @@
    * Validate whether a claim tile may be placed at (row, col).
    * Rules:
    *  - Cannot be placed on the first move (no locked tiles exist yet)
-   *  - Cannot be on blocked, DC, or TC cells
+   *  - Cannot be on blocked cells
    *  - Cannot be on occupied cells (note tile already there)
    *  - Cannot self-steal (refreshing your own claim timer is not allowed)
    *  - May steal an OPPONENT's active claim — the old tile returns to bag in state
@@ -819,9 +821,6 @@
     }
     if (cell.tile) {
       return { valid: false, isSteal: false, error: "Cannot claim an occupied space." };
-    }
-    if (cell.premiumType === "DC" || cell.premiumType === "TC") {
-      return { valid: false, isSteal: false, error: "Claim tiles cannot be placed on DC or TC spaces." };
     }
 
     var isSteal = false;
@@ -936,7 +935,7 @@
       fullPCs = axisInfo.pcs;              // duplicate — unique set unchanged
     } else {
       fullPCs = axisInfo.pcs.concat([newPC]);
-      if (fullPCs.length > 5) return "invalid"; // detectExactChord always null for 6+
+      if (fullPCs.length > 6) return "invalid"; // detectExactChord always null for 7+
     }
 
     var afterChord = CT.detectExactChord(fullPCs);
@@ -1043,6 +1042,61 @@
     }
 
     return true; // Every note either invalidates a group or only repeats an existing chord.
+  };
+
+  /* ── Perfect Sequence classification ───────────────────────────────── */
+
+  var PERFECT_SEQUENCE_STEP = {
+    "whole step series": 2,
+    "chromatic scale":   1
+  };
+
+  /**
+   * CT.getPerfectSequenceClassification
+   *
+   * Determines whether the notes in `cells` (in board order) form a
+   * "Perfect Sequence" — each successive unique pitch class is exactly
+   * one step above the previous (mod 12), where step is:
+   *   whole step series → 2 (whole tone)
+   *   chromatic scale   → 1 (semitone)
+   *
+   * Cells must be in board order (left→right or top→bottom) as returned
+   * by extractScoringGroups. Duplicate pitch classes are skipped; first
+   * occurrence wins.
+   *
+   * Returns:
+   *   { label: null,               bonusPct: 0  }  — not a scale family
+   *   { label: "none",             bonusPct: 0  }  — scale but not sequential
+   *   { label: "Perfect Sequence", bonusPct: 40 }  — ascending step sequence
+   */
+  CT.getPerfectSequenceClassification = function (cells, chordResult) {
+    var step = PERFECT_SEQUENCE_STEP[chordResult.chordType];
+    if (step === undefined) return { label: null, bonusPct: 0 };
+
+    // Build ordered list of unique PCs in board order (first occurrence wins)
+    var seen = {};
+    var orderedPCs = [];
+    for (var i = 0; i < cells.length; i++) {
+      if (!cells[i].tile) continue;
+      var note = CT.getEffectiveNote(cells[i].tile);
+      if (!note) continue;
+      var pc = CT.NOTE_TO_PITCH_CLASS[note];
+      if (pc === undefined || pc < 0) continue;
+      if (!seen[pc]) {
+        seen[pc] = true;
+        orderedPCs.push(pc);
+      }
+    }
+
+    if (orderedPCs.length < 2) return { label: "none", bonusPct: 0 };
+
+    for (var j = 1; j < orderedPCs.length; j++) {
+      if (orderedPCs[j] !== (orderedPCs[j - 1] + step) % 12) {
+        return { label: "none", bonusPct: 0 };
+      }
+    }
+
+    return { label: "Perfect Sequence", bonusPct: 30 };
   };
 
   /* ── Exports ────────────────────────────────────────────────────────── */
