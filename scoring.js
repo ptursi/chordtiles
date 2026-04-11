@@ -34,12 +34,14 @@
         root: cr.root,
         displayName: cr.displayName,
         groupScore: gs.groupTotal,
-        tilePoints: gs.tilePoints,
+        tilePoints: gs.baseTilePoints,  // base (pre-multiplier); premiumBonus carries the extra
         chordBonus: gs.chordBonus,
         premiumBonus: gs.premiumBonus,
         isMainLine: group.isMainLine,
         inversionBonus: gs.inversionBonus,
-        inversionLabel: gs.inversionLabel
+        inversionLabel: gs.inversionLabel,
+        perfectSequenceBonus: gs.perfectSequenceBonus,
+        perfectSequenceLabel: gs.perfectSequenceLabel
       });
     }
 
@@ -51,7 +53,7 @@
   };
 
   /**
-   * Score a single group using the 7-step pipeline.
+   * Score a single group.
    * @param {boolean} isMainGroup  True only for the main placement line.
    */
   function scoreGroup(cells, chordResult, board, placedSet, isMainGroup) {
@@ -60,72 +62,100 @@
       bonusPts = Object.assign({}, bonusPts, CT.VARIANT_CHORD_BONUS_POINTS);
     }
 
-    // Step 1 & 2: Calculate tile points with multipliers
-    var baseTilePointsTotal = 0;      // raw tile points without multipliers
-    var tilePointsTotal = 0;          // tile points after DN/TN multipliers
+    // Step 1: Base tile points — no multipliers applied yet.
+    var baseTilePointsTotal = 0;
     var hasWildInGroup = false;
     var tileDetails = [];
 
     for (var i = 0; i < cells.length; i++) {
       var cell = cells[i];
       if (!cell.tile) continue;
-
       var tile = cell.tile;
       if (tile.isWild) hasWildInGroup = true;
-
       var basePoints = tile.isWild ? 0 : tile.points;
-      var isNewlyPlaced = placedSet[cell.row + "," + cell.col];
-      var tileMultiplier = 1;
-
-      // Step 2: Apply tile multipliers (DN, TN) only to tiles placed this turn
-      // and only if the cell hasn't been locked before (first time on premium)
-      if (isNewlyPlaced && !cell.isLocked && cell.premiumType) {
-        if (cell.premiumType === "DN") tileMultiplier = 2;
-        else if (cell.premiumType === "TN") tileMultiplier = 3;
-      }
-
-      var tileScore = basePoints * tileMultiplier;
       baseTilePointsTotal += basePoints;
-      tilePointsTotal += tileScore;
       tileDetails.push({
         note: CT.getEffectiveNote(tile),
         base: basePoints,
-        multiplier: tileMultiplier,
-        score: tileScore
+        multiplier: 1,      // finalised after premium evaluation
+        score: basePoints
       });
     }
 
-    // Step 3: tile points are summed (done above)
-
-    // Step 4: Chord bonus
+    // Step 2: Base chord bonus.
     var chordBonus = bonusPts[chordResult.chordType] || 0;
 
-    // Step 5: Chord multipliers (DC, TC) - only from tiles placed THIS turn
-    // If ANY wild tile exists in the group, chord multipliers are suppressed entirely
-    var chordMultiplier = 1;
-    if (!hasWildInGroup) {
-      var highestChordMult = 1;
-      for (var j = 0; j < cells.length; j++) {
-        var cCell = cells[j];
-        if (!placedSet[cCell.row + "," + cCell.col]) continue;
-        if (cCell.isLocked) continue; // premium already used
-        if (cCell.tile && cCell.tile.isWild) continue;
+    // Step 3: Premium square evaluation — single best premium wins per group.
+    //
+    // Candidates and their extra-point values:
+    //   DN  →  baseTilePointsTotal × 1   (all group tiles × 2, extra = tiles × 1)
+    //   TN  →  baseTilePointsTotal × 2   (all group tiles × 3, extra = tiles × 2)
+    //   DC  →  chordBonus × 1            (chord bonus × 2, extra = chord × 1)
+    //   TC  →  chordBonus × 2            (chord bonus × 3, extra = chord × 2)
+    //
+    // Constraints:
+    //   • Only newly placed, non-locked tiles may trigger a premium.
+    //   • Wild tiles in the group suppress DC/TC (chord multipliers) entirely —
+    //     including when the wild tile itself sits on the DC/TC square.
+    //     hasWildInGroup handles both cases via a single early-exit continue,
+    //     so DC/TC are never selected as best-premium when wilds are present.
+    //   • Wild tiles do NOT suppress DN/TN. A wild sitting on a DN/TN square
+    //     still triggers the tile multiplier (the wild contributes 0 pts itself
+    //     but all other tiles in the group are still multiplied).
+    //   • DN/TN apply to ALL tiles in the group (incl. locked) but only on the
+    //     main line — cross-groups never receive tile multipliers.
+    //   • After confirmation the cell is locked and cannot trigger again.
+    //   • In a tie, the first premium encountered (board reading order) wins.
 
-        if (cCell.premiumType === "DC" && 2 > highestChordMult) highestChordMult = 2;
-        else if (cCell.premiumType === "TC" && 3 > highestChordMult) highestChordMult = 3;
+    var bestPremiumType  = null;
+    var bestPremiumExtra = 0;
+
+    for (var j = 0; j < cells.length; j++) {
+      var pCell = cells[j];
+      if (!placedSet[pCell.row + "," + pCell.col]) continue; // newly placed only
+      if (pCell.isLocked) continue;                          // already used
+      if (!pCell.premiumType) continue;
+
+      var pt = pCell.premiumType;
+      var isChordMult = (pt === "DC" || pt === "TC");
+      var isTileMult  = (pt === "DN" || pt === "TN");
+
+      if (isChordMult && hasWildInGroup) continue; // wild suppresses chord mults
+      if (isTileMult  && !isMainGroup)   continue; // tile mults: main line only
+
+      var extra = 0;
+      if      (pt === "DN") extra = baseTilePointsTotal;
+      else if (pt === "TN") extra = baseTilePointsTotal * 2;
+      else if (pt === "DC") extra = chordBonus;
+      else if (pt === "TC") extra = chordBonus * 2;
+
+      if (extra > bestPremiumExtra) {
+        bestPremiumExtra = extra;
+        bestPremiumType  = pt;
       }
-      chordMultiplier = highestChordMult;
     }
 
-    var chordBonusTotal = chordBonus * chordMultiplier;
+    // Step 4: Apply the winning premium.
+    var tileGroupMultiplier = 1;
+    var chordMultiplier     = 1;
 
-    // Step 5b: Inversion bonus — main line only, applied to base chord value only.
-    // DC/TC chord multipliers and inversion bonus are independent and stack freely.
-    // Cross-groups never receive this bonus (isMainGroup === false).
-    // Augmented, fully diminished 7th, and sus4 return bonusPct=0 from
-    // CT.getInversionClassification so they are excluded automatically.
+    if      (bestPremiumType === "DN") tileGroupMultiplier = 2;
+    else if (bestPremiumType === "TN") tileGroupMultiplier = 3;
+    else if (bestPremiumType === "DC") chordMultiplier     = 2;
+    else if (bestPremiumType === "TC") chordMultiplier     = 3;
+
+    var tilePointsTotal = baseTilePointsTotal * tileGroupMultiplier;
+    var chordBonusTotal = chordBonus          * chordMultiplier;
+
+    // Propagate the group multiplier into tile details.
+    for (var td = 0; td < tileDetails.length; td++) {
+      tileDetails[td].multiplier = tileGroupMultiplier;
+      tileDetails[td].score      = tileDetails[td].base * tileGroupMultiplier;
+    }
+
+    // Step 5b: Inversion bonus — main line only, applied to BASE chord value.
     var inversionBonus = 0;
-    var inversionLabel = null; // null = feature off / not the main group
+    var inversionLabel = null;
 
     if (isMainGroup && CT.state && CT.state.settings.enableInversionBonus) {
       var invResult = CT.getInversionClassification(cells, chordResult);
@@ -135,41 +165,39 @@
       }
     }
 
-    // Step 6: Cadence bonus (+10 if CS square and chord is 7th or 9th)
-    var cadenceBonus = 0;
-    if (CT.SEVENTH_OR_NINTH_TYPES.has(chordResult.chordType)) {
-      for (var k = 0; k < cells.length; k++) {
-        var csCell = cells[k];
-        if (placedSet[csCell.row + "," + csCell.col] && !csCell.isLocked && csCell.premiumType === "CS") {
-          cadenceBonus = 10;
-          break;
-        }
+    // Step 5c: Perfect Sequence bonus — scale families only, variant mode on.
+    var perfectSequenceBonus = 0;
+    var perfectSequenceLabel = null;
+
+    if (CT.state && CT.state.settings.enableVariantMode) {
+      var psResult = CT.getPerfectSequenceClassification(cells, chordResult);
+      perfectSequenceLabel = psResult.label;
+      if (psResult.bonusPct > 0) {
+        perfectSequenceBonus = Math.round(chordBonus * psResult.bonusPct / 100);
       }
     }
 
-    // Step 7: Sum
-    var groupTotal = tilePointsTotal + chordBonusTotal + cadenceBonus + inversionBonus;
-
-    // Premium bonus = everything beyond base tile points + base chord bonus
-    // i.e. tile multiplier additions + chord multiplier additions + cadence bonus
-    // NOTE: inversionBonus is tracked separately and not folded into premiumBonus.
-    var premiumBonus = (tilePointsTotal - baseTilePointsTotal) + (chordBonusTotal - chordBonus) + cadenceBonus;
+    // Step 6: Sum.
+    var groupTotal   = tilePointsTotal + chordBonusTotal + inversionBonus + perfectSequenceBonus;
+    var premiumBonus = (tilePointsTotal - baseTilePointsTotal) + (chordBonusTotal - chordBonus);
 
     return {
-      tilePoints: tilePointsTotal,
-      baseTilePoints: baseTilePointsTotal,
-      tileDetails: tileDetails,
-      chordBonus: chordBonus,
-      chordMultiplier: chordMultiplier,
-      chordBonusTotal: chordBonusTotal,
-      cadenceBonus: cadenceBonus,
-      inversionBonus: inversionBonus,
-      inversionLabel: inversionLabel,
-      premiumBonus: premiumBonus,
-      groupTotal: groupTotal,
-      chordType: chordResult.chordType,
-      displayName: chordResult.displayName,
-      hasWild: hasWildInGroup
+      tilePoints:           tilePointsTotal,
+      baseTilePoints:       baseTilePointsTotal,
+      tileDetails:          tileDetails,
+      chordBonus:           chordBonus,
+      chordMultiplier:      chordMultiplier,
+      tileGroupMultiplier:  tileGroupMultiplier,
+      chordBonusTotal:      chordBonusTotal,
+      inversionBonus:       inversionBonus,
+      inversionLabel:       inversionLabel,
+      perfectSequenceBonus: perfectSequenceBonus,
+      perfectSequenceLabel: perfectSequenceLabel,
+      premiumBonus:         premiumBonus,
+      groupTotal:           groupTotal,
+      chordType:            chordResult.chordType,
+      displayName:          chordResult.displayName,
+      hasWild:              hasWildInGroup
     };
   }
 
