@@ -892,6 +892,13 @@
             html += '<span class="preview-inversion-info">Inversion Bonus: <em>none</em></span>';
           }
         }
+        if (c.perfectSequenceLabel !== null) {
+          if (c.perfectSequenceBonus > 0) {
+            html += '<span class="preview-inversion-info">Perfect Sequence <strong>(+' + c.perfectSequenceBonus + ')</strong></span>';
+          } else {
+            html += '<span class="preview-inversion-info">Perfect Sequence: <em>none</em></span>';
+          }
+        }
         return html;
       }).join("");
       // Append claim indicator if a claim tile was also placed
