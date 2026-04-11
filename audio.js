@@ -225,6 +225,13 @@
     mode = mode || "harmonic";
     if (!notes || notes.length === 0) return;
 
+    // Scale patterns always play melodically regardless of the global setting —
+    // sounding 6 consecutive semitones or whole-tone notes simultaneously is
+    // dissonant and musically misleading.
+    if (chordType === "whole step series" || chordType === "chromatic scale") {
+      mode = "melodic";
+    }
+
     var midiNotes = getChordMidiNotes(notes, chordType);
 
     try {
