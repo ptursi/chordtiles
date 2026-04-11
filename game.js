@@ -412,6 +412,13 @@
             html += '<span class="summary-line">Inversion Bonus: <em>none</em></span>';
           }
         }
+        if (c.perfectSequenceLabel !== null) {
+          if (c.perfectSequenceBonus > 0) {
+            html += '<span class="summary-line">Perfect Sequence: <strong>+' + c.perfectSequenceBonus + '</strong></span>';
+          } else {
+            html += '<span class="summary-line">Perfect Sequence: <em>none</em></span>';
+          }
+        }
         html += '<span class="summary-line summary-total">= <strong>' + c.groupScore + ' points</strong></span>';
         html += '</div>';
       });
