@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chord Tiles</title>
-  <link rel="stylesheet" href="style.css?v=14" />
+  <link rel="stylesheet" href="style.css?v=16" />
 </head>
 <body>
 
@@ -172,6 +172,11 @@
               <span>Enable Claim Tiles ★</span>
             </label>
             <p class="setting-help">Adds rare ★ claim tiles to the bag (6 in chromatic mode, 3 in diatonic). Place one to reserve a board space for yourself for 3 rounds — opponents cannot play there. Cannot be placed on DC or TC squares. One per rack, one per turn. Requires a new game to change.</p>
+            <label class="toggle-row">
+              <input type="checkbox" id="enableChordIdentify" checked />
+              <span>Enable chord identification</span>
+            </label>
+            <p class="setting-help">Tap any locked tile to highlight and name its chord group(s). Tap the same tile again to dismiss.</p>
           </section>
         </div>
 
@@ -226,9 +231,12 @@
       <p class="modal-eyebrow">Game Over</p>
       <h2 id="gameOverTitle"></h2>
       <p id="gameOverMessage"></p>
+      <div id="gameOverTurnSummary" class="game-over-turn-summary" hidden></div>
       <div id="gameOverScores" class="game-over-scores"></div>
-      <div class="modal-actions">
-        <button id="gameOverNewGame" class="btn-primary" type="button">New Game</button>
+      <div class="modal-actions modal-actions-stacked">
+        <button id="gameOverRestart" class="btn-primary" type="button">Restart Game</button>
+        <button id="gameOverViewBoard" class="btn-secondary" type="button">View Finished Game</button>
+        <button id="gameOverMainMenu" class="btn-secondary" type="button">Main Menu</button>
       </div>
     </div>
   </div>
@@ -260,7 +268,10 @@
         <p id="previewError" class="preview-error"></p>
       </div>
 
-      <!-- Bonus tracker (removed) -->
+      <!-- Chord identification panel (desktop sidebar) -->
+      <div id="identifyPanel" class="identify-panel" hidden>
+        <div id="identifyContent" class="identify-content"></div>
+      </div>
     </aside>
 
     <!-- CENTER: Board -->
@@ -270,6 +281,11 @@
       </div>
       <div id="boardScoreOverlay" class="board-score-overlay" hidden></div>
     </section>
+
+    <!-- CHORD IDENTIFICATION STRIP (mobile, shown below mobile preview bar) -->
+    <div id="mobileIdentifyBar" class="mobile-identify-bar" hidden>
+      <div id="mobileIdentifyContent" class="mobile-identify-content"></div>
+    </div>
 
     <!-- MOBILE PREVIEW STRIP (hidden on desktop; shown between board and rack on narrow screens) -->
     <div id="mobilePreviewBar" class="mobile-preview-bar" hidden>
@@ -282,17 +298,23 @@
 
     <!-- BOTTOM: Rack & Actions -->
     <footer class="rack-bar">
-      <div class="rack-actions-left">
+      <div id="rackActionsLeft" class="rack-actions-left">
         <button id="shuffleRackBtn" class="btn-secondary btn-small" type="button" title="Shuffle rack">Shuffle</button>
         <button id="recallTilesBtn" class="btn-secondary btn-small" type="button" title="Return tiles to rack">Recall</button>
       </div>
 
       <div id="rackContainer" class="rack"></div>
 
-      <div class="rack-actions-right">
+      <div id="rackActionsRight" class="rack-actions-right">
         <button id="confirmMoveBtn" class="btn-primary" type="button" disabled>Confirm</button>
         <button id="passTurnBtn" class="btn-secondary btn-small" type="button">Pass</button>
         <button id="swapTilesBtn" class="btn-secondary btn-small" type="button">Swap</button>
+      </div>
+
+      <!-- View finished game controls (hidden during active play) -->
+      <div id="viewBoardActions" class="view-board-actions" hidden>
+        <button id="viewBoardMainMenu" class="btn-secondary btn-small" type="button">Main Menu</button>
+        <button id="viewBoardRestart" class="btn-primary btn-small" type="button">Restart Game</button>
       </div>
     </footer>
 
@@ -317,6 +339,11 @@
             <option value="harmonic">Harmonic</option>
             <option value="melodic">Melodic</option>
           </select>
+          <label class="toggle-row">
+            <input type="checkbox" id="midChordIdentify" checked />
+            <span>Chord identification on tap</span>
+          </label>
+          <p class="setting-help">Tap any locked tile to highlight and name its chord group(s).</p>
         </section>
         <section class="settings-section">
           <h3>Game</h3>
@@ -345,12 +372,12 @@
     </div>
   </div>
 
-  <script src="data.js?v=14"></script>
-  <script src="state.js?v=14"></script>
-  <script src="chord-engine.js?v=14"></script>
-  <script src="scoring.js?v=14"></script>
-  <script src="audio.js?v=14"></script>
-  <script src="ui.js?v=14"></script>
-  <script src="game.js?v=14"></script>
+  <script src="data.js?v=16"></script>
+  <script src="state.js?v=16"></script>
+  <script src="chord-engine.js?v=16"></script>
+  <script src="scoring.js?v=16"></script>
+  <script src="audio.js?v=16"></script>
+  <script src="ui.js?v=16"></script>
+  <script src="game.js?v=16"></script>
 </body>
 </html>
