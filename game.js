@@ -157,10 +157,39 @@
       });
     });
 
-    // Game over -> board select
-    els.gameOverNewGame.addEventListener("click", function () {
+    // Game over — Main Menu
+    els.gameOverMainMenu.addEventListener("click", function () {
       CT.ui.closeModal(els.gameOverModal);
-      CT.ui.showBoardSelect();
+      clearTimer();
+      CT.state = null;
+      CT.ui.showLanding();
+    });
+
+    // Game over — Restart Game (same settings)
+    els.gameOverRestart.addEventListener("click", function () {
+      CT.ui.closeModal(els.gameOverModal);
+      startGameWithSettings(CT.state.settings);
+    });
+
+    // Game over — View Finished Game
+    els.gameOverViewBoard.addEventListener("click", function () {
+      CT.ui.closeModal(els.gameOverModal);
+      CT.ui.showBoardViewMode();
+    });
+
+    // View-board bar — Main Menu
+    els.viewBoardMainMenu.addEventListener("click", function () {
+      clearTimer();
+      CT.state = null;
+      CT.ui.hideBoardViewMode();
+      CT.ui.showLanding();
+    });
+
+    // View-board bar — Restart Game
+    els.viewBoardRestart.addEventListener("click", function () {
+      var settings = CT.state.settings;
+      CT.ui.hideBoardViewMode();
+      startGameWithSettings(settings);
     });
   }
 
@@ -189,6 +218,7 @@
   /* ── Begin player turn ──────────────────────────────────────────────── */
 
   function beginPlayerTurn() {
+    CT.ui.clearChordIdentification();
     CT.ui.renderRack();
     CT.ui.renderScoreboard();
     CT.ui.renderTurnInfo();
@@ -359,11 +389,17 @@
     // Check win condition
     var winResult = CT.checkWinCondition();
 
+    // turnSummaryHtml is passed to the game-over modal only when the game ended
+    // on a confirmed scored turn (scoreResult !== null). Passes, swaps, and
+    // timer expirations all call finishTurn with scoreResult === null, so they
+    // show no final-turn summary in the game-over modal.
+    var finalSummaryHtml = scoreResult ? summaryText : null;
+
     if (winResult) {
       CT.state.phase = "GAME_OVER";
       CT.playSoundEffect("win");
       CT.ui.renderScoreboard();
-      CT.ui.showGameOver(winResult);
+      CT.ui.showGameOver(winResult, finalSummaryHtml);
       return;
     }
 
@@ -378,7 +414,7 @@
       CT.state.phase = "GAME_OVER";
       CT.playSoundEffect("win");
       CT.ui.renderScoreboard();
-      CT.ui.showGameOver(postAdvanceWin);
+      CT.ui.showGameOver(postAdvanceWin, finalSummaryHtml);
       return;
     }
 
@@ -556,6 +592,7 @@
     var els = CT.ui.els();
     els.midEarTraining.checked = s.enableEarTraining;
     els.midPlaybackMode.value = s.playbackMode;
+    if (els.midChordIdentify) els.midChordIdentify.checked = s.enableChordIdentify !== false;
     syncMidEarTrainingState();
   }
 
@@ -567,6 +604,8 @@
     s.autoPlayTileOnTap = earOn;
     s.autoPlayChordOnConfirm = earOn;
     s.playbackMode = els.midPlaybackMode.value;
+    if (els.midChordIdentify) s.enableChordIdentify = els.midChordIdentify.checked;
+    if (!s.enableChordIdentify) CT.ui.clearChordIdentification();
   }
 
   function syncMidEarTrainingState() {
