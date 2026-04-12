@@ -13,6 +13,10 @@
   var selectedRackTile = null;
   var dragState = null;
   var selectedBoardVariantId = null; // set during board selection
+  var isViewMode = false;            // true after "View Finished Game"
+  var identifiedRow = -1;            // locked tile last tapped for identification
+  var identifiedCol = -1;
+  var identifiedCells = [];          // flat list of cells currently highlighted
 
   CT.ui = {};
 
@@ -113,11 +117,27 @@
     els.swapConfirmBtn = document.getElementById("swapConfirmBtn");
     els.swapCancelBtn = document.getElementById("swapCancelBtn");
 
-    els.gameOverModal = document.getElementById("gameOverModal");
-    els.gameOverTitle = document.getElementById("gameOverTitle");
-    els.gameOverMessage = document.getElementById("gameOverMessage");
-    els.gameOverScores = document.getElementById("gameOverScores");
-    els.gameOverNewGame = document.getElementById("gameOverNewGame");
+    els.gameOverModal       = document.getElementById("gameOverModal");
+    els.gameOverTitle       = document.getElementById("gameOverTitle");
+    els.gameOverMessage     = document.getElementById("gameOverMessage");
+    els.gameOverTurnSummary = document.getElementById("gameOverTurnSummary");
+    els.gameOverScores      = document.getElementById("gameOverScores");
+    els.gameOverMainMenu    = document.getElementById("gameOverMainMenu");
+    els.gameOverRestart     = document.getElementById("gameOverRestart");
+    els.gameOverViewBoard   = document.getElementById("gameOverViewBoard");
+
+    els.rackActionsLeft     = document.getElementById("rackActionsLeft");
+    els.rackActionsRight    = document.getElementById("rackActionsRight");
+    els.viewBoardActions    = document.getElementById("viewBoardActions");
+    els.viewBoardMainMenu   = document.getElementById("viewBoardMainMenu");
+    els.viewBoardRestart    = document.getElementById("viewBoardRestart");
+
+    els.enableChordIdentify = document.getElementById("enableChordIdentify");
+    els.identifyPanel       = document.getElementById("identifyPanel");
+    els.identifyContent     = document.getElementById("identifyContent");
+    els.mobileIdentifyBar   = document.getElementById("mobileIdentifyBar");
+    els.mobileIdentifyContent = document.getElementById("mobileIdentifyContent");
+    els.midChordIdentify    = document.getElementById("midChordIdentify");
   };
 
   CT.ui.els = function () { return els; };
@@ -417,13 +437,18 @@
       pts.textContent = tile.points;  // 0 for both wild and claim
       div.appendChild(pts);
 
-      // Tap to select
-      div.addEventListener("click", onRackTileClick);
+      if (isViewMode) {
+        // View-only: no interaction
+        div.classList.add("is-view-only");
+      } else {
+        // Tap to select
+        div.addEventListener("click", onRackTileClick);
 
-      // Drag start (pointer events)
-      div.addEventListener("pointerdown", onRackTilePointerDown);
+        // Drag start (pointer events)
+        div.addEventListener("pointerdown", onRackTilePointerDown);
 
-      div.style.touchAction = "none";
+        div.style.touchAction = "none";
+      }
 
       els.rackContainer.appendChild(div);
       rackElements.push(div);
@@ -487,9 +512,30 @@
   /* ── Cell click (tap-to-place) ──────────────────────────────────────── */
 
   function onCellClick(e) {
+    if (!CT.state) return;
     var row = parseInt(e.currentTarget.dataset.row);
     var col = parseInt(e.currentTarget.dataset.col);
     var cell = CT.state.board[row][col];
+
+    // Chord identification — works in both active play and view mode
+    if (cell.isLocked && cell.tile && !cell.tile.isClaim &&
+        CT.state.settings.enableChordIdentify) {
+      if (identifiedRow === row && identifiedCol === col) {
+        // Same tile tapped again → dismiss
+        identifiedRow = -1;
+        identifiedCol = -1;
+        CT.ui.clearChordIdentification();
+      } else {
+        identifiedRow = row;
+        identifiedCol = col;
+        CT.ui.showChordIdentification(row, col);
+      }
+      return;
+    }
+
+    // All remaining interactions are blocked in view mode
+    if (isViewMode) return;
+
     var cellDiv2 = e.currentTarget;
 
     // If cell has a note tile placed this turn, return it to rack
@@ -1044,7 +1090,7 @@
 
   /* ── Game over modal ────────────────────────────────────────────────── */
 
-  CT.ui.showGameOver = function (result) {
+  CT.ui.showGameOver = function (result, turnSummaryHtml) {
     var st = CT.state;
     var winnerNames = result.winners.map(function (i) { return st.players[i].name; });
     els.gameOverTitle.textContent = result.winners.length === 1
@@ -1058,6 +1104,15 @@
       "bag-depleted": "Tile bag depleted. Final scores:"
     };
     els.gameOverMessage.textContent = reasons[result.reason] || "Game over.";
+
+    // Show final turn summary if the game ended on a confirmed scored turn.
+    if (turnSummaryHtml) {
+      els.gameOverTurnSummary.innerHTML = turnSummaryHtml;
+      els.gameOverTurnSummary.hidden = false;
+    } else {
+      els.gameOverTurnSummary.innerHTML = "";
+      els.gameOverTurnSummary.hidden = true;
+    }
 
     els.gameOverScores.innerHTML = "";
     st.players.forEach(function (p, i) {
@@ -1186,6 +1241,102 @@
     els.gameContainer.hidden = false;
   };
 
+  CT.ui.showLanding = function () {
+    els.gameContainer.hidden = true;
+    isViewMode = false;
+    els.rackActionsLeft.hidden  = false;
+    els.rackActionsRight.hidden = false;
+    els.viewBoardActions.hidden = true;
+    els.landingScreen.classList.add("is-open");
+  };
+
+  CT.ui.showBoardViewMode = function () {
+    isViewMode = true;
+    els.rackActionsLeft.hidden  = true;
+    els.rackActionsRight.hidden = true;
+    els.viewBoardActions.hidden = false;
+    CT.ui.renderRack();
+  };
+
+  CT.ui.hideBoardViewMode = function () {
+    isViewMode = false;
+    els.rackActionsLeft.hidden  = false;
+    els.rackActionsRight.hidden = false;
+    els.viewBoardActions.hidden = true;
+    CT.ui.renderRack();
+  };
+
+  /* ── Chord identification ────────────────────────────────────────────── */
+
+  CT.ui.clearChordIdentification = function () {
+    identifiedRow = -1;
+    identifiedCol = -1;
+    identifiedCells.forEach(function (cell) {
+      var div = cellElements[cell.row] && cellElements[cell.row][cell.col];
+      if (div) div.classList.remove("cell-identified");
+    });
+    identifiedCells = [];
+    if (els.identifyPanel)     els.identifyPanel.hidden = true;
+    if (els.mobileIdentifyBar) els.mobileIdentifyBar.hidden = true;
+  };
+
+  CT.ui.showChordIdentification = function (row, col) {
+    // Clear previous highlight
+    identifiedCells.forEach(function (cell) {
+      var div = cellElements[cell.row] && cellElements[cell.row][cell.col];
+      if (div) div.classList.remove("cell-identified");
+    });
+    identifiedCells = [];
+
+    var groups = CT.identifyChordAtCell(CT.state.board, row, col);
+
+    if (!groups) {
+      if (els.identifyPanel)     els.identifyPanel.hidden = true;
+      if (els.mobileIdentifyBar) els.mobileIdentifyBar.hidden = true;
+      return;
+    }
+
+    // Collect all cells (H + V), deduplicated
+    var seen = {};
+    function addCells(cells) {
+      if (!cells) return;
+      cells.forEach(function (cell) {
+        var key = cell.row + "," + cell.col;
+        if (!seen[key]) {
+          seen[key] = true;
+          identifiedCells.push(cell);
+          var div = cellElements[cell.row] && cellElements[cell.row][cell.col];
+          if (div) div.classList.add("cell-identified");
+        }
+      });
+    }
+    if (groups.horizontal) addCells(groups.horizontal.cells);
+    if (groups.vertical)   addCells(groups.vertical.cells);
+
+    // Build description HTML
+    var showDir = groups.horizontal && groups.vertical;
+    var html = "";
+    function entryHtml(info, dirLabel) {
+      var h = '<div class="identify-entry">';
+      if (showDir) h += '<span class="identify-dir">' + dirLabel + '</span>';
+      h += '<span class="identify-name">' + esc(info.displayName) + '</span>';
+      if (info.invLabel) h += '<span class="identify-inv">' + esc(info.invLabel) + '</span>';
+      h += '</div>';
+      return h;
+    }
+    if (groups.horizontal) html += entryHtml(groups.horizontal, "↔ Horizontal");
+    if (groups.vertical)   html += entryHtml(groups.vertical,   "↕ Vertical");
+
+    if (els.identifyContent) {
+      els.identifyContent.innerHTML = html;
+      els.identifyPanel.hidden = false;
+    }
+    if (els.mobileIdentifyContent) {
+      els.mobileIdentifyContent.innerHTML = html;
+      els.mobileIdentifyBar.hidden = false;
+    }
+  };
+
   /* ── Setup form helpers ─────────────────────────────────────────────── */
 
   function syncPlayerNames(count) {
@@ -1250,7 +1401,8 @@
       enableBlockedSpaces: els.enableBlockedSpaces ? els.enableBlockedSpaces.checked : true,
       triadsOnlyMode: els.triadsOnlyMode ? els.triadsOnlyMode.checked : false,
       enableInversionBonus: els.enableInversionBonus ? els.enableInversionBonus.checked : true,
-      enableClaimTiles: els.enableClaimTiles ? els.enableClaimTiles.checked : false
+      enableClaimTiles: els.enableClaimTiles ? els.enableClaimTiles.checked : false,
+      enableChordIdentify: els.enableChordIdentify ? els.enableChordIdentify.checked : true
     };
   };
 
