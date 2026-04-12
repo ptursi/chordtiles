@@ -1025,6 +1025,15 @@ input[type="number"], input[type="text"], select {
 
 /* ── Game over ────────────────────────────────────────────── */
 
+.game-over-turn-summary {
+  margin: 0.75rem 0 0.25rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.12);
+  font-size: 0.88rem;
+  text-align: left;
+}
+
 .game-over-scores {
   display: flex; flex-direction: column; gap: 0.4rem;
   margin: 1rem 0;
@@ -1040,6 +1049,109 @@ input[type="number"], input[type="text"], select {
 .game-over-row.is-winner {
   background: rgba(221, 184, 92, 0.15);
   border: 1px solid rgba(221, 184, 92, 0.3);
+}
+
+/* Game over modal — stacked action buttons */
+.modal-actions-stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.modal-actions-stacked button {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Fix: CSS display:flex overrides the [hidden] attribute's display:none */
+#rackActionsLeft[hidden],
+#rackActionsRight[hidden],
+#viewBoardActions[hidden] {
+  display: none !important;
+}
+
+/* ── Chord identification ────────────────────────────────────────────── */
+
+/* Light blue outline on identified chord cells — targets the tile itself */
+.cell-identified .board-tile {
+  outline: 2.5px solid #5bb8d4;
+  outline-offset: -1px;
+}
+
+/* Sidebar panel (desktop) */
+.identify-panel {
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  background: rgba(91, 184, 212, 0.1);
+  border: 1px solid rgba(91, 184, 212, 0.28);
+}
+
+.identify-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.2rem 0;
+}
+
+.identify-entry + .identify-entry {
+  border-top: 1px solid rgba(91, 184, 212, 0.2);
+  margin-top: 0.3rem;
+  padding-top: 0.35rem;
+}
+
+.identify-dir {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(91, 184, 212, 0.6);
+  font-weight: 600;
+}
+
+.identify-name {
+  color: #5bb8d4;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.identify-inv {
+  color: rgba(91, 184, 212, 0.72);
+  font-size: 0.74rem;
+}
+
+/* Mobile identify strip — hidden on desktop, shown between board and rack on narrow screens */
+.mobile-identify-bar {
+  display: none;
+}
+
+.mobile-identify-bar .identify-entry {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0;
+}
+
+.mobile-identify-bar .identify-entry + .identify-entry {
+  border-top: none;
+  border-left: 1px solid rgba(91, 184, 212, 0.25);
+  margin-top: 0;
+  padding-top: 0;
+  padding-left: 1rem;
+  margin-left: 0;
+}
+
+/* View finished game — rack-bar controls */
+.view-board-actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* View-only rack tiles (finished game inspection) */
+.rack-tile.is-view-only {
+  cursor: default;
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 /* ── Animations ───────────────────────────────────────────── */
@@ -1214,7 +1326,20 @@ input[type="number"], input[type="text"], select {
   .turn-info { flex: 1; min-width: 120px; padding: 0.5rem; }
   .scoreboard { flex-direction: row; flex-wrap: wrap; flex: 1; }
   .score-pill { flex: 1; min-width: 80px; }
-  .preview-panel { display: none; }
+  .preview-panel  { display: none; }
+  .identify-panel { display: none; }
+
+  .mobile-identify-bar {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    padding: 0.35rem 0.75rem;
+    background: rgba(91, 184, 212, 0.1);
+    border-top: 1px solid rgba(91, 184, 212, 0.22);
+  }
+  .mobile-identify-bar[hidden] { display: none; }
 
   .landing-features { grid-template-columns: repeat(2, 1fr); }
   .settings-grid { grid-template-columns: 1fr; }
@@ -1237,6 +1362,11 @@ input[type="number"], input[type="text"], select {
 
   .rack-actions-left, .rack-actions-right {
     flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .view-board-actions {
+    width: 100%;
     justify-content: center;
   }
 
