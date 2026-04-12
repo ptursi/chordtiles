@@ -360,6 +360,8 @@
       onConfirm: function () {
         clearTimer();
         CT.recallAllTiles();
+        CT.ui.renderRack();
+        refreshAfterPlacementChange();
         CT.passTurn();
         finishTurn(null, CT.currentPlayer().name + " passed.");
       }
