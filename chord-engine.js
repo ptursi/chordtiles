@@ -1165,4 +1165,58 @@
     return { pass: pass, fail: fail };
   };
 
+  /* ── Chord identification for locked tiles ──────────────────────────── */
+
+  /**
+   * Given a locked tile at (row, col), find the contiguous locked-tile groups
+   * in both the horizontal and vertical directions, detect their chord, and
+   * return inversion info.  Only locked tiles are included in the scan
+   * (placed-this-turn tiles are excluded) so the result is stable during play.
+   *
+   * @returns {Object|null}  { horizontal, vertical }  — either member may be
+   *   null if that direction has no 3-tile locked group.  Returns null when
+   *   neither direction yields a chord.
+   */
+  CT.identifyChordAtCell = function (board, row, col) {
+    function getLockedGroup(dr, dc) {
+      var r = row, c = col;
+      // Walk backward to find group start
+      while (r - dr >= 0 && r - dr < 15 && c - dc >= 0 && c - dc < 15 &&
+             board[r - dr][c - dc].tile && board[r - dr][c - dc].isLocked) {
+        r -= dr; c -= dc;
+      }
+      // Collect forward through contiguous locked tiles
+      var cells = [];
+      while (r >= 0 && r < 15 && c >= 0 && c < 15 &&
+             board[r][c].tile && board[r][c].isLocked) {
+        cells.push(board[r][c]);
+        r += dr; c += dc;
+      }
+      return cells;
+    }
+
+    function chordInfoFor(cells) {
+      if (cells.length < 3) return null;
+      var pcs = [];
+      cells.forEach(function (cell) {
+        var note = CT.getEffectiveNote(cell.tile);
+        if (!note) return;
+        var pc = CT.NOTE_TO_PITCH_CLASS[note];
+        if (pc !== undefined && pc >= 0) pcs.push(pc);
+      });
+      var chord = CT.detectExactChord(pcs);
+      if (!chord) return null;
+      // getInversionClassification expects chordResult.root to be a note name string
+      // (rootName), not the pitch class number that detectExactChord stores in .root.
+      var inv = CT.getInversionClassification(cells, { chordType: chord.chordType, root: chord.rootName });
+      var invLabel = (inv.label && inv.label !== "none") ? inv.label : null;
+      return { displayName: chord.displayName, invLabel: invLabel, cells: cells };
+    }
+
+    var hInfo = chordInfoFor(getLockedGroup(0, 1));
+    var vInfo = chordInfoFor(getLockedGroup(1, 0));
+    if (!hInfo && !vInfo) return null;
+    return { horizontal: hInfo, vertical: vInfo };
+  };
+
 })();
