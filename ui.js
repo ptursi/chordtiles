@@ -964,6 +964,14 @@
     openModal(els.confirmModal);
   };
 
+  // Force-close the confirm modal and discard pending callbacks.
+  // Call this when the timer expires to prevent stale pass/confirm actions.
+  CT.ui.cancelConfirm = function () {
+    closeModal(els.confirmModal);
+    pendingConfirm = null;
+    pendingCancel  = null;
+  };
+
   CT.ui.bindConfirmModal = function () {
     els.confirmYes.addEventListener("click", function () {
       closeModal(els.confirmModal);
