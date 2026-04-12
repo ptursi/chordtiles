@@ -535,17 +535,16 @@
 
   function handleTimerExpired() {
     clearTimer();
-    // Auto-confirm if valid, otherwise pass
-    var placed = CT.getPlacedTilePositions();
-    if (placed.length > 0) {
-      var validation = CT.validatePlacement(CT.state.board, placed, CT.isFirstMove());
-      if (validation.valid) {
-        handleConfirmMove();
-        return;
-      }
-    }
-    // Can't make a valid move, auto-pass
+    // Force-close swap and pass-confirmation modals if either is open.
+    // This prevents the player from acting on a stale modal after the turn ends.
+    var els = CT.ui.els();
+    CT.ui.cancelConfirm();
+    CT.ui.closeModal(els.swapModal);
+    // Recall any placed tiles and re-render so the board clears visually.
+    // Placed tiles must never remain on the board for the next player.
     CT.recallAllTiles();
+    CT.ui.renderRack();
+    refreshAfterPlacementChange();
     CT.passTurn();
     finishTurn(null, CT.currentPlayer().name + "'s time expired. Turn passed.");
   }
